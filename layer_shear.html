@@ -1,0 +1,1898 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Layer Slab Shearing Simulation</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 12px;
+            background-color: #f0f0f0;
+        }
+        .container {
+            display: flex;
+            gap: 20px;
+            max-width: 1800px;
+            margin: 0 auto;
+        }
+        .controls {
+            background: white;
+            padding: 12px 14px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            width: 240px;
+            height: fit-content;
+        }
+        .simulation {
+            flex: 1;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+        }
+        .simulation-content {
+            display: flex;
+            gap: 20px;
+            flex: 1;
+        }
+        .simulation-viz {
+            flex: 1;
+        }
+        .layer-controls {
+            background: white;
+            padding: 12px 14px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            width: 240px;
+            height: fit-content;
+        }
+        canvas {
+            border: 2px solid #333;
+            display: block;
+            margin: 0 auto;
+        }
+        .control-group {
+            margin-bottom: 10px;
+        }
+        label {
+            display: block;
+            margin-bottom: 4px;
+            font-weight: bold;
+            font-size: 13px;
+        }
+        input, select {
+            width: 100%;
+            padding: 4px 6px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+        button {
+            width: 100%;
+            padding: 8px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 4px 0;
+            font-size: 13px;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .layer-config {
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            background: #f9f9f9;
+        }
+        .layer-header {
+            font-weight: bold;
+            margin-bottom: 6px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 13px;
+        }
+        .remove-layer {
+            background: #f44336;
+            padding: 5px 10px;
+            font-size: 12px;
+        }
+        .status {
+            margin-top: 8px;
+            padding: 8px;
+            background: #e8f5e8;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+        .grid-small input {
+            width: calc(50% - 5px);
+            display: inline-block;
+        }
+        .material-colors {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            margin-top: 5px;
+        }
+        .color-swatch {
+            width: 20px;
+            height: 20px;
+            border: 1px solid #333;
+            cursor: pointer;
+            border-radius: 3px;
+            margin: 2px;
+        }
+        .color-swatch.selected {
+            border: 2px solid #000;
+            transform: scale(1.1);
+        }
+        .color-palette {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 3px;
+            margin-top: 3px;
+        }
+        
+        /* Range slider styling */
+        input[type="range"] {
+            width: 100%;
+            height: 6px;
+            border-radius: 3px;
+            background: #ddd;
+            outline: none;
+            appearance: none;
+            -webkit-appearance: none;
+            margin: 6px 0 10px 0;
+        }
+        
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #4CAF50;
+            cursor: pointer;
+            border: 2px solid #fff;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        input[type="range"]::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #4CAF50;
+            cursor: pointer;
+            border: 2px solid #fff;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        input[type="range"]:hover::-webkit-slider-thumb {
+            background: #45a049;
+            transform: scale(1.1);
+        }
+        
+        input[type="range"]:hover::-moz-range-thumb {
+            background: #45a049;
+            transform: scale(1.1);
+        }
+        
+        /* Pan slider shows window-proportional thumb width */
+        #panSlider::-webkit-slider-thumb {
+            width: var(--thumb-w, 20px);
+            height: 12px;
+            border-radius: 3px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+            border: 1px solid #e6e6e6;
+        }
+        #panSlider::-moz-range-thumb {
+            width: var(--thumb-w, 20px);
+            height: 12px;
+            border-radius: 3px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+            border: 1px solid #e6e6e6;
+        }
+        #panSlider:hover::-webkit-slider-thumb { transform: none; background: #45a049; }
+        #panSlider:hover::-moz-range-thumb { transform: none; background: #45a049; }
+        
+        .control-group label span {
+            color: #4CAF50;
+            font-weight: normal;
+            margin-left: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="controls">
+            <h2>Simulation Controls</h2>
+            
+            <div class="control-group">
+                <label>Temperature (°C): <span id="tempValue">20</span></label>
+                <input type="range" id="temperature" value="20" min="-50" max="200" step="1">
+            </div>
+            
+            <div class="control-group">
+                <label>Strain Rate (s⁻¹): <span id="strainValue">0.60</span></label>
+                <input type="range" id="strainRate" value="0.60" min="-2" max="1.75" step="0.01">
+            </div>
+            
+            <div class="control-group">
+                <label>Resolution (grid points): <span id="resValue">100</span></label>
+                <input type="range" id="resolution" value="100" min="40" max="150" step="5">
+            </div>
+            
+            <div class="control-group">
+                <label>Contact Noise: <span id="noiseValue">5</span></label>
+                <input type="range" id="interfaceNoise" value="5" min="0" max="10" step="0.1" title="Amplitude of interface roughness (scales with grid)">
+            </div>
+            
+            <div class="control-group">
+                <label>Noise Correlation: <span id="noiseCorrValue">5</span></label>
+                <input type="range" id="noiseCorrelation" value="5" min="1" max="10" step="0.1" title="Similarity of noise across interfaces (1=same, 10=independent)">
+            </div>
+            
+            <div class="control-group">
+                <label>Noise Density: <span id="noiseDensityValue">1.00</span></label>
+                <input type="range" id="noiseDensity" value="1.00" min="0.5" max="10" step="0.1" title="Spatial frequency of interface roughness (higher = closer bumps)">
+            </div>
+            
+            <div class="control-group">
+                <label>Grid Line Color:</label>
+                <input type="color" id="gridLineColor" value="#000000" title="Select color for the deforming grid lines">
+                <small style="color: #666; font-size: 12px;">Controls the color of the mesh structure lines</small>
+                <div style="margin-top:6px;">
+                    <label style="font-weight: normal; display: inline-flex; align-items: center; gap:6px;">
+                        <input type="checkbox" id="showGridLines" checked style="width:auto;">
+                        Show grid lines
+                    </label>
+                </div>
+                <div style="margin-top:6px;">
+                    <label style="font-weight: normal; display: inline-flex; align-items: center; gap:6px;">
+                        <input type="checkbox" id="showLayerLabels" checked style="width:auto;">
+                        Show material labels
+                    </label>
+                </div>
+                <div style="margin-top:6px;">
+                    <label style="font-weight: normal; display: inline-flex; align-items: center; gap:6px;">
+                        <input type="checkbox" id="showLayerFills" checked style="width:auto;">
+                        Show layer colors
+                    </label>
+                </div>
+            </div>
+            
+            <div class="control-group">
+                <label>Max off-screen span (×width): <span id="offscreenSpanValue">2</span></label>
+                <input type="range" id="offscreenSpan" value="2" min="1" max="8" step="1" title="Upper limit of screen-widths to render on each side. Higher = more buffer, slower.">
+            </div>
+            <div class="control-group">
+                <label><input type="checkbox" id="extendedDomainToggle" style="width:auto; margin-right:6px;"> Extended domain (compute off-screen)</label>
+            </div>
+                        
+
+            
+            <div class="control-group">
+                <button onclick="startSimulation()" id="startBtn">Start Simulation</button>
+                <button onclick="pauseSimulation()" id="pauseBtn" disabled>Pause</button>
+                <button onclick="resetSimulation()" id="resetBtn">Reset</button>
+            </div>
+            
+            <div class="status" id="status">
+                Ready to simulate
+            </div>
+        </div>
+        
+        <div class="simulation">
+            <h2>Layer Shearing Visualization</h2>
+            <div class="simulation-content">
+                <div class="simulation-viz">
+                    <canvas id="simulationCanvas" width="1200" height="600"></canvas>
+                    <div style="margin-top: 8px;">
+                        <input type="range" id="panSlider" value="0.5" min="0" max="1" step="0.001" style="width: 100%;" title="Pan across off-screen material">
+                    </div>
+                </div>
+                
+                <div class="layer-controls">
+                    <h3>Layer Configuration</h3>
+                    
+                    <button onclick="addLayer()">Add New Layer</button>
+                    <button onclick="addRandomLayer()" style="background: #FF9800;">🎲 Add Random Layer</button>
+                    
+                    <div class="control-group">
+                        <label>Random Layer Generator:</label>
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <input type="number" id="randomLayerCount" value="3" min="1" max="10" style="width: 60px;">
+                            <button onclick="generateRandomLayers()" style="width: auto; padding: 8px 15px; background: #9C27B0;">🎲 Generate Random</button>
+                        </div>
+                        <small style="color: #666; font-size: 12px;">Creates random material layers with varied thicknesses and colors</small>
+                    </div>
+                    
+                    <div id="layersContainer">
+                        <h4>Material Layers</h4>
+                    </div>
+                    
+                    <div class="control-group">
+                        <button onclick="clearAllLayers()" style="background: #ff9800;">Clear All Layers</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Predefined color palette for layers
+        const colorPalette = [
+            '#FFE4B5', // Light beige
+            '#696969', // Dark gray
+            '#87CEEB', // Light blue
+            '#4169E1', // Royal blue
+            '#D2691E', // Chocolate
+            '#2F4F4F', // Dark slate
+            '#FF6B6B', // Light red
+            '#4ECDC4', // Turquoise
+            '#45B7D1', // Sky blue
+            '#96CEB4', // Sage green
+            '#FFEAA7', // Light yellow
+            '#DDA0DD', // Plum
+            '#98D8C8', // Mint green
+            '#F7DC6F', // Golden yellow
+            '#BB8FCE'  // Light purple
+        ];
+
+        // Material property database
+        const materialDatabase = {
+            'Paraffin Wax': {
+                baseViscosity: 1000,
+                tempCoefficient: -20,
+                friction: 0.3,
+                elasticModulus: 5e5,  // Lower - more ductile
+                yieldStress: 1000,
+                powerLawN: 3.0,
+                refShearRate: 0.1,
+                etaMin: 50,
+                density: 900
+            },
+            'Gel': {
+                baseViscosity: 500,
+                tempCoefficient: -5,
+                friction: 0.1,
+                elasticModulus: 1e5,  // Very low - very ductile
+                yieldStress: 100,
+                powerLawN: 2.0,
+                refShearRate: 0.1,
+                etaMin: 10,
+                density: 1000
+            },
+            'Clay': {
+                baseViscosity: 2000,
+                tempCoefficient: -30,
+                friction: 0.6,
+                elasticModulus: 1e7,  // High - more competent
+                yieldStress: 3000,
+                powerLawN: 3.5,
+                refShearRate: 0.05,
+                etaMin: 100,
+                density: 2200
+            }
+            // ,
+            // 'Hard Rock': {
+            //     baseViscosity: 10000,
+            //     tempCoefficient: -5,
+            //     friction: 0.9,
+            //     elasticModulus: 5e7,  // Very high - competent layer
+            //     yieldStress: 15000,
+            //     powerLawN: 4.0,
+            //     refShearRate: 0.02,
+            //     etaMin: 500,
+            //     density: 2600
+            // }
+        };
+
+        // Simulation state
+        let simulation = {
+            running: false,
+            time: 0,
+            totalStrain: 0,
+            shearGamma: 0,
+            layers: [],
+            canvas: null,
+            ctx: null,
+            animationId: null,
+            gridResolution: 100,
+            gridLineColor: '#000000', // Default black for grid lines
+            offscreenSpan: 2, // minimum number of screen-widths drawn on each side
+            extendedDomain: false, // when true, compute off-screen material uniquely
+            viewPan: 0.5, // 0..1, 0.5 = centered
+            lastRemeshTs: 0,
+            lastRemeshGamma: 0,
+            lastRemeshTotalStrain: 0,
+            interfaceNoise: 0,
+            noiseCorrelation: 1.0,
+            noiseDensity: 1.0,
+            showGridLines: true,
+            showLayerLabels: true,
+            showLayerFills: true,
+            noiseSeed: (Math.random() * 4294967296) >>> 0
+        };
+
+        // --- Interface noise helpers ---
+        function makeRng(seed) {
+            let s = seed >>> 0;
+            return function rng() {
+                s = (s * 1664525 + 1013904223) >>> 0;
+                return s / 4294967296;
+            };
+        }
+
+        function getDomainFactor() {
+            // Use 1 when extended domain is disabled; otherwise 2*span+1
+            if (!simulation.extendedDomain) return 1;
+            const span = Math.max(1, Math.floor(simulation.offscreenSpan || 1));
+            return 2 * span + 1;
+        }
+
+        function getColumnSampleStride() {
+            // Scale sampling stride with domain factor to keep cost bounded
+            const factor = getDomainFactor();
+            // Base stride 2, increase with domain factor
+            return Math.max(2, Math.floor(factor));
+        }
+
+        function rebuildInterfaceProfiles() {
+            if (simulation.layers.length < 2) {
+                simulation.interfaceProfilesAbs = [];
+                return;
+            }
+            // Advance seed so each rebuild gets a fresh noise realization
+            simulation.noiseSeed = (simulation.noiseSeed * 1664525 + 1013904223) >>> 0;
+            const res = simulation.gridResolution;
+            const width = simulation.canvas ? simulation.canvas.width : 800;
+            const columns = res * getDomainFactor();
+            const gridSpacing = width / res;
+            const amplitude = simulation.interfaceNoise * gridSpacing; // scale with grid
+            // Global base phases shared across interfaces
+            const rngGlobal = makeRng(simulation.noiseSeed);
+            const phi1Global = rngGlobal() * Math.PI * 2;
+            const phi2Global = rngGlobal() * Math.PI * 2;
+            const phi3Global = rngGlobal() * Math.PI * 2;
+
+            // Map correlation slider [1..10] to blend factor [1..0]
+            const C = simulation.noiseCorrelation || 1.0; // 1=same, 10=independent
+            const blendGlobal = Math.max(0, Math.min(1, (10 - C) / 9));
+            const blendIndep  = 1 - blendGlobal;
+
+            simulation.interfaceProfilesAbs = [];
+            for (let k = 0; k < simulation.layers.length - 1; k++) {
+                const baseY = simulation.layers[k].position + simulation.layers[k].thickness;
+                const offsets = new Array(columns + 1);
+                // Per-interface independent phases
+                const rngLocal = makeRng((simulation.noiseSeed + 97 * (k + 1)) >>> 0);
+                const phi1Local = rngLocal() * Math.PI * 2;
+                const phi2Local = rngLocal() * Math.PI * 2;
+                const phi3Local = rngLocal() * Math.PI * 2;
+                for (let i = 0; i <= columns; i++) {
+                    // Parameterize noise by world x coordinate in extended mode so slices are not phase-shift repeats
+                    const density = Math.max(0.1, simulation.noiseDensity || 1.0);
+                    let nGlobal, nLocal;
+                    if (simulation.extendedDomain) {
+                        // Use non-commensurate wavelengths relative to visible width
+                        const L = simulation.canvas ? simulation.canvas.width : 800;
+                        const x = i * gridSpacing; // world x in pixels across extended domain
+                        const w1 = 2 * Math.PI / (L * (0.83 / density));
+                        const w2 = 2 * Math.PI / (L * (0.47 / density));
+                        const w3 = 2 * Math.PI / (L * (0.29 / density));
+                        nGlobal = (
+                            0.6 * Math.sin(w1 * x + phi1Global) +
+                            0.3 * Math.sin(w2 * x + phi2Global) +
+                            0.1 * Math.sin(w3 * x + phi3Global)
+                        );
+                        nLocal = (
+                            0.6 * Math.sin(w1 * x + phi1Local) +
+                            0.3 * Math.sin(w2 * x + phi2Local) +
+                            0.1 * Math.sin(w3 * x + phi3Local)
+                        );
+                    } else {
+                        // Legacy: span the visible width
+                        const t = (i / columns) * Math.PI * 2;
+                        const tf = density * t;
+                        nGlobal = (
+                            0.6 * Math.sin(1 * tf + phi1Global) +
+                            0.3 * Math.sin(2 * tf + phi2Global) +
+                            0.1 * Math.sin(4 * tf + phi3Global)
+                        );
+                        nLocal = (
+                            0.6 * Math.sin(1 * tf + phi1Local) +
+                            0.3 * Math.sin(2 * tf + phi2Local) +
+                            0.1 * Math.sin(4 * tf + phi3Local)
+                        );
+                    }
+                    const offset = amplitude * (blendGlobal * nGlobal + blendIndep * nLocal);
+                    offsets[i] = baseY + offset;
+                }
+                simulation.interfaceProfilesAbs[k] = offsets;
+            }
+        }
+
+        function applyInterfaceProfilesToGrids() {
+            if (!simulation.interfaceProfilesAbs || simulation.interfaceProfilesAbs.length === 0) return;
+            const columns = simulation.gridResolution * getDomainFactor();
+            const res = Math.min(columns, simulation.layers[0].nodes.length - 1);
+            for (let k = 0; k < simulation.layers.length - 1; k++) {
+                const upper = simulation.layers[k];
+                const lower = simulation.layers[k + 1];
+                const topRowIndexLower = lower.nodes[0].length - 1;
+                const profile = simulation.interfaceProfilesAbs[k];
+                for (let i = 0; i <= res; i++) {
+                    const yShared = profile[i];
+                    if (upper.nodes[i] && upper.nodes[i][0] && Number.isFinite(yShared)) {
+                        upper.nodes[i][0].y = yShared;
+                        upper.nodes[i][0].originalY = yShared;
+                    }
+                    if (lower.nodes[i] && lower.nodes[i][topRowIndexLower] && Number.isFinite(yShared)) {
+                        lower.nodes[i][topRowIndexLower].y = yShared;
+                        lower.nodes[i][topRowIndexLower].originalY = yShared;
+                    }
+                }
+            }
+        }
+
+        function enforceInterfaceConformance() {
+            if (simulation.layers.length < 2) return;
+            const columns = simulation.gridResolution * getDomainFactor();
+            const res = Math.min(columns, simulation.layers[0].nodes.length - 1);
+            const canvasWidth = simulation.canvas ? simulation.canvas.width : 800;
+            for (let k = 0; k < simulation.layers.length - 1; k++) {
+                const upper = simulation.layers[k];
+                const lower = simulation.layers[k + 1];
+                const topRowIndexLower = lower.nodes[0].length - 1;
+                for (let i = 0; i <= res; i++) {
+                    const upperY = upper.nodes[i][0].y;
+                    const lowerY = lower.nodes[i][topRowIndexLower].y;
+                    // If we have a baseline profile, prefer it; otherwise use average to glue surfaces
+                    const yShared = (simulation.interfaceProfilesAbs && simulation.interfaceProfilesAbs[k])
+                        ? simulation.interfaceProfilesAbs[k][i]
+                        : (upperY + lowerY) * 0.5;
+                    if (Number.isFinite(yShared)) {
+                        upper.nodes[i][0].y = yShared;
+                        lower.nodes[i][topRowIndexLower].y = yShared;
+                        // Keep originalY in sync to avoid boundary-condition conflicts
+                        upper.nodes[i][0].originalY = yShared;
+                        lower.nodes[i][topRowIndexLower].originalY = yShared;
+                        // Do not force x alignment; allow shear to form naturally in co-moving frame
+                    }
+                }
+            }
+        }
+
+        function enforceColumnwiseThickness() {
+            if (simulation.layers.length === 0) return;
+            const totalColumns = simulation.gridResolution * getDomainFactor();
+            const res = Math.min(totalColumns, simulation.layers[0].nodes.length - 1);
+            const topRigidY = 20;
+            const bottomRigidY = (simulation.layers.length > 0)
+                ? simulation.layers[simulation.layers.length - 1].position + simulation.layers[simulation.layers.length - 1].thickness
+                : 580;
+            for (let k = 0; k < simulation.layers.length; k++) {
+                const layer = simulation.layers[k];
+                const rows = layer.nodes[0].length;
+                for (let i = 0; i <= res; i++) {
+                    // For this layer, top boundary equals upper's bottom; bottom boundary equals lower's top
+                    const topY = (k === 0)
+                        ? topRigidY
+                        : simulation.layers[k - 1].nodes[i][0].y; // upper's bottom row
+                    const bottomY = (k === simulation.layers.length - 1)
+                        ? bottomRigidY
+                        : simulation.layers[k + 1].nodes[i][simulation.layers[k + 1].nodes[0].length - 1].y; // lower's top row
+                    for (let j = 0; j < rows; j++) {
+                        const t = (rows === 1) ? 0 : (j / (rows - 1));
+                        // j=0 is bottom row; j=rows-1 is top row
+                        const y = bottomY + t * (topY - bottomY);
+                        layer.nodes[i][j].y = y;
+                        layer.nodes[i][j].originalY = y;
+                    }
+                }
+            }
+        }
+
+        // Layer class
+        class Layer {
+            constructor(material, thickness, position, color = null) {
+                this.material = material;
+                this.thickness = thickness;
+                this.position = position; // y-position of layer bottom
+                this.properties = {...materialDatabase[material]};
+                this.color = color || colorPalette[Math.floor(Math.random() * colorPalette.length)]; // Random color if none specified
+                this.nodes = []; // Grid points for this layer
+                this.initializeGrid();
+            }
+
+            initializeGrid() {
+                const res = simulation.gridResolution;
+                const columns = res * getDomainFactor();
+                this.nodes = [];
+                
+                // Calculate grid spacing to ensure square cells (based on single-width spacing)
+                const gridSpacing = simulation.canvas ? (simulation.canvas.width / res) : (800 / res); // Horizontal spacing per screen width
+                const verticalSpacing = gridSpacing; // Use same spacing for vertical
+                
+                // Calculate number of vertical grid points based on thickness and spacing
+                const verticalPoints = Math.max(2, Math.ceil(this.thickness / verticalSpacing));
+                
+                for (let i = 0; i <= columns; i++) {
+                    const row = [];
+                    for (let j = 0; j < verticalPoints; j++) {
+                        row.push({
+                            x: i * gridSpacing, // Evenly spaced horizontal points
+                            y: this.position + (j / (verticalPoints - 1)) * this.thickness, // Evenly spaced vertical points
+                            vx: 0,
+                            vy: 0,
+                            originalX: i * gridSpacing,
+                            originalY: this.position + (j / (verticalPoints - 1)) * this.thickness,
+                            stress: 0,
+                            strain: 0
+                        });
+                    }
+                    this.nodes.push(row);
+                }
+            }
+
+            // Simple periodic remesh in co-shearing frame: rebuild regular x′ grid and sample
+            remeshCoShear() {
+                const res = simulation.gridResolution;
+                const columns = res * getDomainFactor();
+                const gridSpacing = simulation.canvas ? (simulation.canvas.width / res) : (800 / res);
+                const verticalSpacing = gridSpacing;
+                const gamma = simulation.shearGamma;
+                const topY = 20;
+                const rows = this.nodes[0].length;
+                const newNodes = [];
+                // Bilinear sampling helpers
+                const sample = (xp, yp) => {
+                    const iFloat = xp / gridSpacing;
+                    const jFloat = (yp - this.position) / (this.thickness / (rows - 1));
+                    const i0 = Math.max(0, Math.min(columns - 1, Math.floor(iFloat)));
+                    const j0 = Math.max(0, Math.min(rows - 2, Math.floor(jFloat)));
+                    const tx = iFloat - i0;
+                    const ty = jFloat - j0;
+                    const n00 = this.nodes[i0][j0];
+                    const n10 = this.nodes[i0 + 1][j0];
+                    const n01 = this.nodes[i0][j0 + 1];
+                    const n11 = this.nodes[i0 + 1][j0 + 1];
+                    const lerp = (a,b,t)=>a*(1-t)+b*t;
+                    const blend = (a00,a10,a01,a11)=> lerp(lerp(a00,a10,tx), lerp(a01,a11,tx), ty);
+                    return {
+                        vx: blend(n00.vx, n10.vx, n01.vx, n11.vx),
+                        vy: blend(n00.vy, n10.vy, n01.vy, n11.vy),
+                        stress: blend(n00.stress, n10.stress, n01.stress, n11.stress),
+                        strain: blend(n00.strain, n10.strain, n01.strain, n11.strain)
+                    };
+                };
+                for (let i = 0; i <= columns; i++) {
+                    const row = [];
+                    for (let j = 0; j < rows; j++) {
+                        const xPrime = i * gridSpacing;
+                        const y = this.position + (j / (rows - 1)) * this.thickness;
+                        const s = sample(xPrime, y);
+                        row.push({
+                            x: xPrime,
+                            y: y,
+                            vx: s.vx,
+                            vy: s.vy,
+                            originalX: xPrime,
+                            originalY: y,
+                            stress: s.stress,
+                            strain: s.strain
+                        });
+                    }
+                    newNodes.push(row);
+                }
+                this.nodes = newNodes;
+            }
+
+            getCurrentViscosity(temperature, shearRate = 0) {
+                // Base Arrhenius-like temperature effect
+                const base = Math.max(0.1, this.properties.baseViscosity +
+                    this.properties.tempCoefficient * (temperature - 20));
+                const n = this.properties.powerLawN || 1.0;
+                const gamma0 = this.properties.refShearRate || 1.0;
+                const etaMin = this.properties.etaMin || 0.1;
+                const g = Math.max(0, Math.abs(shearRate));
+                // Carreau-like thickening when n>1
+                let eta = base * Math.pow(1 + Math.pow(g / gamma0, 2), (n - 1) / 2);
+                // Simple visco-plastic cap (Bingham/Drucker–Prager proxy)
+                const tauY = this.properties.yieldStress || 0;
+                if (g > 1e-6 && 2 * eta * g > tauY) {
+                    eta = Math.max(etaMin, tauY / (2 * g));
+                }
+                return Math.max(etaMin, eta);
+            }
+
+            updateDeformation(strainRate, dt, temperature, allLayers, layerIndex) {
+                // Couette baseline between rigid walls
+                const topWallY = 20;
+                let bottomConstraintY = 580;
+                if (allLayers.length > 0) {
+                    const bottomLayer = allLayers[allLayers.length - 1];
+                    bottomConstraintY = bottomLayer.position + bottomLayer.thickness;
+                }
+                const vTop = 0; // top wall fixed
+                const vBot = strainRate * 575; // bottom wall speed
+                const canvasWidth = simulation.canvas ? simulation.canvas.width : 800;
+                
+                for (let i = 0; i < this.nodes.length; i++) {
+                    for (let j = 0; j < this.nodes[i].length; j++) {
+                        const node = this.nodes[i][j];
+                        
+                                                 // RIGID BOUNDARY CONDITIONS - Fixed top and bottom walls
+                         const isNearTopWall = node.y <= 30 || (node.originalY <= 30);
+                         
+                         // Calculate dynamic bottom boundary position
+                         let bottomBoundaryY = 570; // Default fallback
+                         if (allLayers.length > 0) {
+                             const bottomLayer = allLayers[allLayers.length - 1];
+                             bottomBoundaryY = bottomLayer.position + bottomLayer.thickness - 10; // 10px buffer
+                         }
+                         
+                         // Keep bottom boundary at fixed vertical position for physics
+                         let animatedBottomBoundaryY = bottomBoundaryY;
+                         
+                         const isNearBottomWall = node.y >= animatedBottomBoundaryY || (node.originalY >= animatedBottomBoundaryY);
+                        
+                        if (isNearTopWall) {
+                            // Top wall - zero velocity in co-shearing frame
+                            node.vx = 0;
+                            node.vy = 0;
+                            node.y = Math.max(node.y, 20); // Keep above rigid boundary
+                        } else if (isNearBottomWall) {
+                            // Bottom wall - fixed vertical position, zero velocity in co-shearing frame
+                            node.vx = 0;
+                            node.vy = 0;
+                            node.y = Math.min(node.y, 580); // Keep below rigid boundary
+                        } else {
+                            // Internal nodes - apply physics with volume conservation
+                            
+                            // Base Couette shear velocity between walls in co-shearing frame
+                            const yNorm = Math.max(0, Math.min(1, (node.y - topWallY) / (bottomConstraintY - topWallY)));
+                            const vCouette = vTop + yNorm * (vBot - vTop);
+                            let targetVx = 0; // zero in co-moving frame
+                            
+                            // Shear-rate dependent viscosity
+                            const localShearRate = Math.abs(this.getLocalShearGradient(i, j));
+                            const viscosityEff = this.getCurrentViscosity(temperature, localShearRate);
+
+                            // Viscous resistance
+                            const viscousForce = (targetVx - node.vx) / (viscosityEff * 0.001 + 1);
+                            node.vx += viscousForce * dt * 5;
+                            
+                            // Enhanced inter-layer coupling and instability generation
+                            let couplingForce = 0;
+                            let verticalForce = 0;
+                            
+                            // Calculate competency and local properties
+                            const layerThickness = this.getLocalThickness(i, j);
+                            const competency = this.properties.elasticModulus / (viscosityEff || 1);
+                            
+                            // Only apply instabilities away from rigid boundaries
+                            const distanceFromBoundaries = Math.min(node.y - 30, 570 - node.y);
+                            const instabilityStrength = Math.min(1.0, distanceFromBoundaries / 50); // Fade near boundaries
+                            
+                            if (instabilityStrength > 0.1) {
+                                // Rayleigh-Taylor type instability for density inversions
+                                if (layerIndex > 0) {
+                                    const lowerLayer = allLayers[layerIndex - 1];
+                                    const densityContrast = (competency - lowerLayer.properties.elasticModulus / lowerLayer.getCurrentViscosity(temperature));
+                                    if (densityContrast > 0) {
+                                        const rtForce = 0.3 * Math.sin(node.x * 0.005 + simulation.time * 0.5) * densityContrast * 0.00001 * instabilityStrength;
+                                        verticalForce += rtForce;
+                                    }
+                                }
+                                
+                                // Kelvin-Helmholtz instability from velocity shear
+                                if (localShearRate > 0.01) {
+                                    const khForce = 1.0 * Math.sin(node.x * 0.008 + simulation.time * 1.0) * localShearRate * instabilityStrength;
+                                    verticalForce += khForce;
+                                }
+                                
+                                // Pinch-and-swell instability for competent layers
+                                if (competency > 1000) {
+                                    const wavelength = layerThickness * 6;
+                                    const psForce = 0.8 * Math.sin(node.x * 2 * Math.PI / wavelength + simulation.time * 0.3) * (competency / 10000) * instabilityStrength;
+                                    verticalForce += psForce;
+                                    
+                                    // Boudinage - lateral pinching
+                                    const boudinForce = -0.5 * Math.cos(node.x * 2 * Math.PI / wavelength + simulation.time * 0.3) * (competency / 10000) * instabilityStrength;
+                                    node.vx += boudinForce * dt;
+                                }
+                                
+                                // Layer-parallel shearing creates asymmetric folds
+                                const asymmetryFactor = Math.sin(node.x * 0.003 + simulation.time * 0.2);
+                                verticalForce += asymmetryFactor * Math.abs(strainRate) * 3 * instabilityStrength;
+                            }
+                            
+                            // Enhanced inter-layer coupling (adjacent layers only for performance)
+                            const neighborIndices = [];
+                            if (layerIndex - 1 >= 0) neighborIndices.push(layerIndex - 1);
+                            if (layerIndex + 1 < allLayers.length) neighborIndices.push(layerIndex + 1);
+                            for (let idx = 0; idx < neighborIndices.length; idx++) {
+                                const k = neighborIndices[idx];
+                                const otherLayer = allLayers[k];
+                                const nearestPoint = this.findNearestPoint(node, otherLayer, i);
+                                
+                                if (nearestPoint && nearestPoint.distance < 40) {
+                                    const viscosityRatio = otherLayer.getCurrentViscosity(temperature, Math.abs(this.getLocalShearGradient(i, j))) / (viscosityEff || 1);
+                                    const coupling = Math.exp(-nearestPoint.distance / 20) * Math.abs(Math.log(viscosityRatio + 0.1));
+                                    
+                                    // Velocity coupling
+                                    const velDiff = nearestPoint.node.vx - node.vx;
+                                    couplingForce += coupling * velDiff * 0.2;
+                                    
+                                    // Viscosity contrast effects
+                                    if (Math.abs(viscosityRatio - 1) > 0.3) {
+                                        const contrastForce = 0.5 * Math.sin(node.x * 0.01 + simulation.time * 2.0) * (viscosityRatio - 1) * instabilityStrength;
+                                        verticalForce += contrastForce * coupling;
+                                    }
+                                }
+                            }
+                            
+                            // Apply horizontal forces
+                            node.vx += couplingForce * dt;
+                            
+                            // VOLUME CONSERVATION CONSTRAINT
+                            // Calculate local area change and apply compensating vertical velocity
+                            const localAreaChange = this.calculateLocalAreaChange(i, j);
+                            const volumeConservationForce = -localAreaChange * 2.0; // Compensate for area changes
+                            
+                            verticalForce += volumeConservationForce;
+                            
+                            // Apply vertical forces
+                            node.vy += verticalForce * dt;
+                            
+                            // Volume conservation damping - stronger damping for vertical motion
+                            node.vy *= 0.95;
+                            
+                            // Add small random perturbations only away from boundaries
+                            if (instabilityStrength > 0.5 && Math.random() < 0.001) {
+                                node.vy += (Math.random() - 0.5) * 0.05;
+                            }
+                        }
+                        
+                        // Update positions with CFL clamp
+                        const dxGrid = (simulation.canvas ? simulation.canvas.width : 800) / simulation.gridResolution;
+                        const dyGrid = dxGrid;
+                        const cflFactor = 0.3;
+                        const proposedDx = node.vx * dt;
+                        const proposedDy = node.vy * dt;
+                        const clampedDx = Math.max(-cflFactor * dxGrid, Math.min(cflFactor * dxGrid, proposedDx));
+                        const clampedDy = Math.max(-cflFactor * dyGrid, Math.min(cflFactor * dyGrid, proposedDy));
+                        node.x += clampedDx;
+                        node.y += clampedDy;
+                        
+                        // PERIODIC DOMAIN: keep x in an unwrapped coordinate.
+                        // Rendering and distance calculations apply periodic images as needed.
+                        
+                                                 // RIGID VERTICAL CONSTRAINTS - Enforce container boundaries
+                         if (node.y < 20) {
+                             node.y = 20;
+                             node.vy = 0;
+                         }
+                         
+                         // Calculate dynamic bottom boundary for constraints (local var to avoid TDZ)
+                         let bottomConstraintYLocal = 580; // Default fallback
+                         if (allLayers.length > 0) {
+                             const bottomLayer = allLayers[allLayers.length - 1];
+                             bottomConstraintYLocal = bottomLayer.position + bottomLayer.thickness;
+                         }
+                         
+                         // Keep bottom constraint at fixed vertical position
+                         let animatedBottomConstraintY = bottomConstraintYLocal;
+                         
+                         if (node.y > animatedBottomConstraintY) {
+                             node.y = animatedBottomConstraintY;
+                             node.vy = 0;
+                         }
+                         
+                         // Monotonic projection along columns to prevent inversion near edges
+                         if (j > 0) {
+                             const prevNode = this.nodes[i][j - 1];
+                             const dyGrid = (simulation.canvas ? simulation.canvas.width : 800) / simulation.gridResolution;
+                             const minGap = 0.15 * dyGrid;
+                             const minAllowedY = prevNode.y + minGap;
+                             if (node.y < minAllowedY) {
+                                 node.y = Math.min(minAllowedY, animatedBottomConstraintY);
+                                 node.vy = 0;
+                             }
+                         }
+                        
+                        // Calculate strain and stress
+                        node.strain = (node.x - node.originalX) / canvasWidth;
+                        const srForStress = Math.abs(this.getLocalShearGradient(i, j));
+                        const etaForStress = this.getCurrentViscosity(temperature, srForStress);
+                        node.stress = etaForStress * Math.abs(node.vx / 100);
+                    }
+                }
+            }
+            
+            calculateLocalAreaChange(i, j) {
+                // Estimate local area change for volume conservation
+                // Compare current quad area to original area
+                if (i >= this.nodes.length - 1 || j >= this.nodes[i].length - 1) return 0;
+                
+                const n1 = this.nodes[i][j];
+                const n2 = this.nodes[i + 1][j];
+                const n3 = this.nodes[i + 1][j + 1];
+                const n4 = this.nodes[i][j + 1];
+                
+                // Current area (approximate)
+                const currentArea = Math.abs((n1.x - n3.x) * (n2.y - n4.y) - (n2.x - n4.x) * (n1.y - n3.y)) / 2;
+                
+                // Original area
+                const o1 = {x: n1.originalX, y: n1.originalY};
+                const o2 = {x: n2.originalX, y: n2.originalY};
+                const o3 = {x: n3.originalX, y: n3.originalY};
+                const o4 = {x: n4.originalX, y: n4.originalY};
+                const originalArea = Math.abs((o1.x - o3.x) * (o2.y - o4.y) - (o2.x - o4.x) * (o1.y - o3.y)) / 2;
+                
+                // Return area change ratio
+                return originalArea > 0 ? (currentArea - originalArea) / originalArea : 0;
+            }
+            
+            getLocalThickness(i, j) {
+                // Estimate local layer thickness
+                if (j === 0) return this.nodes[i][1].y - this.nodes[i][0].y;
+                if (j === this.nodes[i].length - 1) return this.nodes[i][j].y - this.nodes[i][j-1].y;
+                return (this.nodes[i][j+1].y - this.nodes[i][j-1].y) / 2;
+            }
+            
+            getLocalShearGradient(i, j) {
+                // Calculate local velocity gradient
+                let dvx_dy = 0;
+                if (j > 0 && j < this.nodes[i].length - 1) {
+                    const dy = this.nodes[i][j+1].y - this.nodes[i][j-1].y;
+                    const dvx = this.nodes[i][j+1].vx - this.nodes[i][j-1].vx;
+                    dvx_dy = dy > 0 ? dvx / dy : 0;
+                }
+                return dvx_dy;
+            }
+            
+            findNearestPoint(node, otherLayer, hintColumnIndex = null) {
+                let minDistance = Infinity;
+                let nearestNode = null;
+                const canvasWidth = simulation.canvas ? simulation.canvas.width : 800;
+                const columnStride = getColumnSampleStride();
+                const halfWindow = simulation.extendedDomain ? 16 * columnStride : 12; // search window in columns
+
+                const iStart = hintColumnIndex == null ? 0 : Math.max(0, hintColumnIndex - halfWindow);
+                const iEnd   = hintColumnIndex == null ? otherLayer.nodes.length - 1 : Math.min(otherLayer.nodes.length - 1, hintColumnIndex + halfWindow);
+
+                // Sample points from other layer with periodic boundary consideration
+                outer: for (let i = iStart; i <= iEnd; i += columnStride) {
+                    const rowCount = otherLayer.nodes[i].length;
+                    const jStride = simulation.extendedDomain ? Math.max(1, Math.floor(rowCount / 6)) : 1;
+                    for (let j = 0; j < rowCount; j += jStride) {
+                        const otherNode = otherLayer.nodes[i][j];
+                        // Calculate distance considering periodic boundaries
+                        let dx = otherNode.x - node.x;
+                        let dy = otherNode.y - node.y;
+                        // Use minimum image convention (no need to wrap state)
+                        if (!simulation.extendedDomain) {
+                            if (dx >  canvasWidth / 2) dx -= canvasWidth;
+                            if (dx < -canvasWidth / 2) dx += canvasWidth;
+                        }
+                        const distance = Math.sqrt(dx * dx + dy * dy);
+                        if (distance < minDistance) {
+                            minDistance = distance;
+                            nearestNode = otherNode;
+                            // Early exit if extremely close
+                            if (minDistance < 6) break outer;
+                        }
+                    }
+                }
+                return nearestNode ? { node: nearestNode, distance: minDistance } : null;
+            }
+
+            draw(ctx) {
+                ctx.fillStyle = this.color;
+                const baseWidth = (simulation.canvas ? simulation.canvas.width : 800);
+                const canvasWidth = this.__renderWidth || baseWidth;
+                const isExtended = canvasWidth > baseWidth + 1;
+                const gamma = this.__renderGamma || 0;
+                const topY = this.__renderTop || 20;
+                
+                // Fill the entire layer as a single polygon (reduces internal seams)
+                const rows = this.nodes[0].length;
+                const topRowIndex = rows - 1;
+                const shift = this.__renderShift || 0;
+                const unwrapX = (xrPrev, xrCurr) => {
+                    if (isExtended) return xrCurr;
+                    let v = xrCurr;
+                    while (v - xrPrev > baseWidth / 2) v -= baseWidth;
+                    while (xrPrev - v > baseWidth / 2) v += baseWidth;
+                    return v;
+                };
+                // Build polygon: bottom boundary left->right, then top boundary right->left
+                ctx.beginPath();
+                // Bottom start
+                let firstBottom = this.nodes[0][0];
+                let xPrev = firstBottom.x + gamma * (firstBottom.y - topY) + shift;
+                ctx.moveTo(xPrev, firstBottom.y);
+                for (let i = 1; i < this.nodes.length; i++) {
+                    const n = this.nodes[i][0];
+                    let xr = n.x + gamma * (n.y - topY) + shift;
+                    xr = unwrapX(xPrev, xr);
+                    ctx.lineTo(xr, n.y);
+                    xPrev = xr;
+                }
+                // Top boundary reverse
+                let firstTop = this.nodes[this.nodes.length - 1][topRowIndex];
+                let xPrevTop = firstTop.x + gamma * (firstTop.y - topY) + shift;
+                ctx.lineTo(xPrevTop, firstTop.y);
+                for (let i = this.nodes.length - 2; i >= 0; i--) {
+                    const n = this.nodes[i][topRowIndex];
+                    let xr = n.x + gamma * (n.y - topY) + shift;
+                    xr = unwrapX(xPrevTop, xr);
+                    ctx.lineTo(xr, n.y);
+                    xPrevTop = xr;
+                }
+                ctx.closePath();
+                if (simulation.showLayerFills) {
+                    ctx.fill();
+                }
+                
+                // Reset alpha after drawing mesh outlines
+                ctx.globalAlpha = 1.0;
+                
+                if (simulation.showGridLines) {
+                    // Draw vertical grid lines across the layer to avoid extra horizontal contact lines
+                    ctx.strokeStyle = simulation.gridLineColor;
+                    ctx.lineWidth = 0.5;
+                    for (let i = 0; i < this.nodes.length; i++) {
+                        const unwrapCol = (xrPrev, xrCurr) => {
+                            if (isExtended) return xrCurr;
+                            let v = xrCurr;
+                            while (v - xrPrev > baseWidth / 2) v -= baseWidth;
+                            while (xrPrev - v > baseWidth / 2) v += baseWidth;
+                            return v;
+                        };
+                        const first = this.nodes[i][0];
+                        let xPrev = first.x + gamma * (first.y - topY) + (this.__renderShift || 0);
+                        ctx.beginPath();
+                        ctx.moveTo(xPrev, first.y);
+                        for (let j = 1; j < this.nodes[i].length; j++) {
+                            const np = this.nodes[i][j];
+                            let xr = np.x + gamma * (np.y - topY) + (this.__renderShift || 0);
+                            xr = unwrapCol(xPrev, xr);
+                            ctx.lineTo(xr, np.y);
+                            xPrev = xr;
+                        }
+                        ctx.stroke();
+                    }
+
+                    // Draw horizontal grid lines for interior rows (skip contacts at j=0 and j=rows-1)
+                    for (let j = 1; j < this.nodes[0].length - 1; j++) {
+                        const unwrapRow = (xrPrev, xrCurr) => {
+                            if (isExtended) return xrCurr;
+                            let v = xrCurr;
+                            while (v - xrPrev > baseWidth / 2) v -= baseWidth;
+                            while (xrPrev - v > baseWidth / 2) v += baseWidth;
+                            return v;
+                        };
+                        let first = this.nodes[0][j];
+                        let xPrev = first.x + gamma * (first.y - topY) + (this.__renderShift || 0);
+                        ctx.beginPath();
+                        ctx.moveTo(xPrev, first.y);
+                        for (let i = 1; i < this.nodes.length; i++) {
+                            const np = this.nodes[i][j];
+                            let xr = np.x + gamma * (np.y - topY) + (this.__renderShift || 0);
+                            xr = unwrapRow(xPrev, xr);
+                            ctx.lineTo(xr, np.y);
+                            xPrev = xr;
+                        }
+                        ctx.stroke();
+                    }
+                } else if (simulation.showLayerFills) {
+                    // Seam sealing pass: draw the same polylines using the fill color
+                    // to eliminate anti-aliased gaps between adjacent quads.
+                    ctx.strokeStyle = this.color;
+                    ctx.lineWidth = 0.5;
+                    // Vertical seams
+                    for (let i = 0; i < this.nodes.length; i++) {
+                        const unwrapCol = (xrPrev, xrCurr) => {
+                            if (isExtended) return xrCurr;
+                            let v = xrCurr;
+                            while (v - xrPrev > baseWidth / 2) v -= baseWidth;
+                            while (xrPrev - v > baseWidth / 2) v += baseWidth;
+                            return v;
+                        };
+                        const first = this.nodes[i][0];
+                        let xPrev = first.x + gamma * (first.y - topY) + (this.__renderShift || 0);
+                        ctx.beginPath();
+                        ctx.moveTo(xPrev, first.y);
+                        for (let j = 1; j < this.nodes[i].length; j++) {
+                            const np = this.nodes[i][j];
+                            let xr = np.x + gamma * (np.y - topY) + (this.__renderShift || 0);
+                            xr = unwrapCol(xPrev, xr);
+                            ctx.lineTo(xr, np.y);
+                            xPrev = xr;
+                        }
+                        ctx.stroke();
+                    }
+                    // Horizontal seams (interior rows only)
+                    for (let j = 1; j < this.nodes[0].length - 1; j++) {
+                        const unwrapRow = (xrPrev, xrCurr) => {
+                            if (isExtended) return xrCurr;
+                            let v = xrCurr;
+                            while (v - xrPrev > baseWidth / 2) v -= baseWidth;
+                            while (xrPrev - v > baseWidth / 2) v += baseWidth;
+                            return v;
+                        };
+                        let first = this.nodes[0][j];
+                        let xPrev = first.x + gamma * (first.y - topY) + (this.__renderShift || 0);
+                        ctx.beginPath();
+                        ctx.moveTo(xPrev, first.y);
+                        for (let i = 1; i < this.nodes.length; i++) {
+                            const np = this.nodes[i][j];
+                            let xr = np.x + gamma * (np.y - topY) + (this.__renderShift || 0);
+                            xr = unwrapRow(xPrev, xr);
+                            ctx.lineTo(xr, np.y);
+                            xPrev = xr;
+                        }
+                        ctx.stroke();
+                    }
+                }
+                
+                // Draw outer or interface boundary outlines
+                ctx.strokeStyle = simulation.showLayerFills ? this.color : simulation.gridLineColor;
+                ctx.lineWidth = 1;
+                if (this.__drawTopBoundary) {
+                    if (isExtended) this.drawSimpleBoundary(ctx, true); else this.drawWrappedBoundary(ctx, true, baseWidth);
+                }
+                if (this.__drawBottomBoundary) {
+                    if (isExtended) this.drawSimpleBoundary(ctx, false); else this.drawWrappedBoundary(ctx, false, baseWidth);
+                }
+                
+                                 ctx.globalAlpha = 1.0;
+                 
+                 // Material labels are now drawn separately in updateSimulation() to remain fixed
+             }
+            
+            drawWrappedQuad(ctx, n1, n2, n3, n4, canvasWidth) {
+                // Unwrap quad to maintain continuity across the periodic seam
+                const nodes = [n1, n2, n3, n4];
+                const unwrapped = [];
+                unwrapped[0] = { x: nodes[0].x, y: nodes[0].y };
+                for (let i = 1; i < nodes.length; i++) {
+                    let x = nodes[i].x;
+                    while (x - unwrapped[i - 1].x > canvasWidth / 2) x -= canvasWidth;
+                    while (unwrapped[i - 1].x - x > canvasWidth / 2) x += canvasWidth;
+                    unwrapped[i] = { x, y: nodes[i].y };
+                }
+
+                const shifts = [0, -canvasWidth, canvasWidth];
+                for (const shift of shifts) {
+                    const xs = unwrapped.map(p => p.x - shift);
+                    const minX = Math.min(...xs); const maxX = Math.max(...xs);
+                    if (maxX < 0 || minX > canvasWidth) continue;
+
+                    ctx.beginPath();
+                    ctx.moveTo(unwrapped[0].x - shift, unwrapped[0].y);
+                    for (let i = 1; i < unwrapped.length; i++) {
+                        ctx.lineTo(unwrapped[i].x - shift, unwrapped[i].y);
+                    }
+                    ctx.closePath();
+                    ctx.fill();
+                    if (simulation.showGridLines) {
+                        ctx.strokeStyle = simulation.gridLineColor;
+                        ctx.lineWidth = 0.5;
+                        ctx.stroke();
+                    }
+                }
+            }
+            
+            drawWrappedBoundary(ctx, isTop, canvasWidth) {
+                const boundaryNodes = [];
+                const rowIndex = isTop ? this.nodes[0].length - 1 : 0;
+                const gamma = this.__renderGamma || 0;
+                const topY = this.__renderTop || 20;
+                const renderShift = this.__renderShift || 0;
+                
+                // Collect boundary nodes
+                for (let i = 0; i < this.nodes.length; i++) {
+                    boundaryNodes.push(this.nodes[i][rowIndex]);
+                }
+                
+                // Unwrap sequentially after applying affine shear and tile shift
+                const unwrapped = [];
+                const xFirst = boundaryNodes[0].x + gamma * (boundaryNodes[0].y - topY) + renderShift;
+                unwrapped[0] = { x: xFirst, y: boundaryNodes[0].y };
+                for (let i = 1; i < boundaryNodes.length; i++) {
+                    let x = boundaryNodes[i].x + gamma * (boundaryNodes[i].y - topY) + renderShift;
+                    while (x - unwrapped[i - 1].x > canvasWidth / 2) x -= canvasWidth;
+                    while (unwrapped[i - 1].x - x > canvasWidth / 2) x += canvasWidth;
+                    unwrapped[i] = { x, y: boundaryNodes[i].y };
+                }
+
+                const shifts = [0, -canvasWidth, canvasWidth];
+                for (const shift of shifts) {
+                    ctx.beginPath();
+                    ctx.moveTo(unwrapped[0].x - shift, unwrapped[0].y);
+                    for (let i = 1; i < unwrapped.length; i++) {
+                        ctx.lineTo(unwrapped[i].x - shift, unwrapped[i].y);
+                    }
+                    ctx.stroke();
+                }
+            }
+
+            // Simple boundary drawing with no wrapping (used for extended-domain rendering)
+            drawSimpleBoundary(ctx, isTop) {
+                const rowIndex = isTop ? this.nodes[0].length - 1 : 0;
+                const gamma = this.__renderGamma || 0;
+                const topY = this.__renderTop || 20;
+                const shift = this.__renderShift || 0;
+                ctx.beginPath();
+                let first = this.nodes[0][rowIndex];
+                let x0 = first.x + gamma * (first.y - topY) + shift;
+                ctx.moveTo(x0, first.y);
+                for (let i = 1; i < this.nodes.length; i++) {
+                    const n = this.nodes[i][rowIndex];
+                    const xr = n.x + gamma * (n.y - topY) + shift;
+                    ctx.lineTo(xr, n.y);
+                }
+                ctx.stroke();
+            }
+        }
+
+        function initializeSimulation() {
+            simulation.canvas = document.getElementById('simulationCanvas');
+            simulation.ctx = simulation.canvas.getContext('2d');
+            
+            // Add default layers with different colors
+            addLayer('Paraffin Wax', 100, '#FFE4B5');
+            addLayer('Clay', 90, '#696969');
+            addLayer('Gel', 110, '#87CEEB');
+            rebuildInterfaceProfiles();
+            applyInterfaceProfilesToGrids();
+            // Ensure interior rows follow the interfaces before first draw
+            enforceInterfaceConformance();
+            enforceColumnwiseThickness();
+        }
+
+        function addLayer(materialName = 'Paraffin Wax', thickness = 50, color = null) {
+            const layerId = 'layer_' + Date.now();
+            
+            // Add the new layer
+            const layer = new Layer(materialName, thickness, 0, color); // Position will be set by repositioning
+            simulation.layers.push(layer);
+            
+            // Reposition all layers to maintain continuity
+            repositionLayersAfterThicknessChange();
+            
+            createLayerUI(layerId, materialName, thickness, simulation.layers.length - 1, color);
+            updateSimulation();
+        }
+        
+        function generateRandomLayers() {
+            // Replace existing layers and their UI with a fresh random set
+            simulation.layers = [];
+            refreshLayerUI(); // remove existing layer-config nodes so we replace instead of append
+
+            // Get requested count
+            const layerCount = parseInt(document.getElementById('randomLayerCount').value);
+            const maxLayers = Math.min(layerCount, 10);
+
+            // Build a new set without creating UI per-add (faster + avoids duplicates)
+            const materials = Object.keys(materialDatabase);
+            const shuffledMaterials = [...materials].sort(() => Math.random() - 0.5);
+            const shuffledColors = [...colorPalette].sort(() => Math.random() - 0.5);
+
+            for (let i = 0; i < maxLayers; i++) {
+                const randomMaterial = shuffledMaterials[i % materials.length];
+                const randomThickness = Math.floor(Math.random() * 150) + 30;
+                const randomColor = shuffledColors[i % colorPalette.length];
+                const layer = new Layer(randomMaterial, randomThickness, 0, randomColor);
+                simulation.layers.push(layer);
+            }
+
+            // Position layers, rebuild interfaces, and redraw controls once
+            repositionLayersAfterThicknessChange();
+            refreshLayerUI();
+            updateSimulation();
+
+            document.getElementById('status').textContent = `Generated ${maxLayers} random layers`;
+        }
+        
+        function clearAllLayers() {
+            // Clear all layers
+            simulation.layers = [];
+            
+            // Refresh UI
+            refreshLayerUI();
+            
+            // Update simulation
+            updateSimulation();
+            
+            // Update status
+            document.getElementById('status').textContent = 'All layers cleared';
+        }
+        
+        function addRandomLayer() {
+            // Available materials
+            const materials = Object.keys(materialDatabase);
+            
+            // Random material
+            const randomMaterial = materials[Math.floor(Math.random() * materials.length)];
+            
+            // Random thickness between 30 and 120 pixels
+            const randomThickness = Math.floor(Math.random() * 90) + 30;
+            
+            // Random color from palette
+            const randomColor = colorPalette[Math.floor(Math.random() * colorPalette.length)];
+            
+            // Add the random layer
+            addLayer(randomMaterial, randomThickness, randomColor);
+            
+            // Update status
+            document.getElementById('status').textContent = `Added random ${randomMaterial} layer`;
+        }
+
+        function createLayerUI(layerId, materialName, thickness, index, color = null) {
+            const container = document.getElementById('layersContainer');
+            const layerDiv = document.createElement('div');
+            layerDiv.className = 'layer-config';
+            layerDiv.id = layerId;
+            
+            // Get current layer color or use provided color
+            const currentColor = color || simulation.layers[index]?.color || colorPalette[0];
+            
+            layerDiv.innerHTML = `
+                <div class="layer-header">
+                    <span>Layer ${index + 1}</span>
+                    <button class="remove-layer" onclick="removeLayer(${index})">Remove</button>
+                </div>
+                <div class="control-group">
+                    <label>Material:</label>
+                    <select onchange="updateLayerMaterial(${index}, this.value)">
+                        ${Object.keys(materialDatabase).map(mat => 
+                            `<option value="${mat}" ${mat === materialName ? 'selected' : ''}>${mat}</option>`
+                        ).join('')}
+                    </select>
+                </div>
+                <div class="control-group">
+                    <label>Thickness (px):</label>
+                    <input type="number" value="${thickness}" min="10" max="200" 
+                           onchange="updateLayerThickness(${index}, this.value)">
+                </div>
+                <div class="control-group">
+                    <label>Color:</label>
+                    <div class="color-palette" id="color-palette-${index}">
+                        ${colorPalette.map((colorOption, colorIndex) => 
+                            `<div class="color-swatch ${colorOption === currentColor ? 'selected' : ''}" 
+                                  style="background-color: ${colorOption}"
+                                  onclick="updateLayerColor(${index}, '${colorOption}', ${colorIndex})"
+                                  title="Click to select"></div>`
+                        ).join('')}
+                    </div>
+                </div>
+                <div class="control-group grid-small">
+                    <label>Viscosity: ${simulation.layers[index]?.getCurrentViscosity(20) || 'N/A'}</label>
+                    <label>Friction: ${simulation.layers[index]?.properties.friction || 'N/A'}</label>
+                </div>
+            `;
+            
+            container.appendChild(layerDiv);
+        }
+
+        function removeLayer(index) {
+            simulation.layers.splice(index, 1);
+            
+            // Only reposition if there are remaining layers
+            if (simulation.layers.length > 0) {
+                repositionLayersAfterThicknessChange(); // Reposition remaining layers
+            }
+            
+            refreshLayerUI();
+            updateSimulation();
+        }
+
+        function updateLayerMaterial(index, material) {
+            if (simulation.layers[index]) {
+                simulation.layers[index].material = material;
+                simulation.layers[index].properties = {...materialDatabase[material]};
+                simulation.layers[index].initializeGrid();
+                refreshLayerUI();
+                updateSimulation();
+            }
+        }
+
+        function updateLayerThickness(index, thickness) {
+            if (simulation.layers[index]) {
+                simulation.layers[index].thickness = parseFloat(thickness);
+                
+                // Reposition all layers to maintain continuity (no gaps)
+                repositionLayersAfterThicknessChange();
+                
+                updateSimulation();
+            }
+        }
+        
+        function updateLayerColor(index, color, colorIndex) {
+            if (simulation.layers[index]) {
+                simulation.layers[index].color = color;
+                
+                // Update the visual selection in the color palette
+                const palette = document.getElementById(`color-palette-${index}`);
+                if (palette) {
+                    // Remove previous selection
+                    palette.querySelectorAll('.color-swatch').forEach(swatch => {
+                        swatch.classList.remove('selected');
+                    });
+                    
+                    // Add selection to clicked color
+                    const selectedSwatch = palette.children[colorIndex];
+                    if (selectedSwatch) {
+                        selectedSwatch.classList.add('selected');
+                    }
+                }
+                
+                updateSimulation();
+            }
+        }
+        
+        function repositionLayersAfterThicknessChange() {
+            // Only proceed if there are layers to reposition
+            if (simulation.layers.length === 0) return;
+            
+            // Start from the top boundary (y=20) and position layers sequentially
+            let currentY = 20;
+            
+            simulation.layers.forEach(layer => {
+                layer.position = currentY;
+                layer.initializeGrid(); // Reinitialize with new position
+                currentY += layer.thickness;
+            });
+            
+            // Ensure we don't exceed the bottom boundary (y=580)
+            if (currentY > 580) {
+                console.warn('Total layer thickness exceeds available space. Consider reducing layer thicknesses.');
+            }
+
+            // Rebuild and apply interface profiles after structural changes
+            rebuildInterfaceProfiles();
+            applyInterfaceProfilesToGrids();
+            enforceInterfaceConformance();
+            enforceColumnwiseThickness();
+        }
+
+        function refreshLayerUI() {
+            const container = document.getElementById('layersContainer');
+            // Remove all layer configs except the header
+            const layerConfigs = container.querySelectorAll('.layer-config');
+            layerConfigs.forEach(config => config.remove());
+            
+            // Recreate all layers
+            simulation.layers.forEach((layer, index) => {
+                createLayerUI(`layer_${index}`, layer.material, layer.thickness, index, layer.color);
+            });
+        }
+
+        function startSimulation() {
+            if (simulation.layers.length === 0) {
+                alert('Please add at least one layer before starting simulation');
+                return;
+            }
+            
+            simulation.running = true;
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('pauseBtn').disabled = false;
+            
+            animate();
+        }
+
+        function pauseSimulation() {
+            simulation.running = false;
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('pauseBtn').disabled = true;
+            
+            if (simulation.animationId) {
+                cancelAnimationFrame(simulation.animationId);
+            }
+        }
+
+        function resetSimulation() {
+            pauseSimulation();
+            simulation.time = 0;
+            simulation.totalStrain = 0;
+            simulation.shearGamma = 0;
+            simulation.lastRemeshTotalStrain = 0;
+            
+            // Reset all layers to initial state and reposition them
+            repositionLayersAfterThicknessChange();
+            
+            updateSimulation();
+            document.getElementById('status').textContent = 'Simulation reset';
+        }
+
+        function animate() {
+            if (!simulation.running) return;
+            
+            const dt = 0.016; // ~60 FPS
+            const strainRate = parseFloat(document.getElementById('strainRate').value);
+            const temperature = parseFloat(document.getElementById('temperature').value);
+            
+            simulation.time += dt;
+            simulation.totalStrain += strainRate * dt;
+            simulation.shearGamma += strainRate * dt; // accumulate affine shear
+            
+            // Update each layer with full coupling
+            simulation.layers.forEach((layer, index) => {
+                layer.updateDeformation(strainRate, dt, temperature, simulation.layers, index);
+            });
+
+            // Enforce perfectly conforming interfaces after physics
+            enforceInterfaceConformance();
+            // Re-interpolate interior rows to prevent columnwise compression/expansion
+            enforceColumnwiseThickness();
+
+            // Remesh when accumulated total strain increases by 250%
+            const needByTotalStrain = (simulation.totalStrain - simulation.lastRemeshTotalStrain) >= 2.5;
+            if (needByTotalStrain) {
+                simulation.layers.forEach(layer => layer.remeshCoShear());
+                simulation.lastRemeshTotalStrain = simulation.totalStrain;
+                // After remesh, re-apply interfaces
+                applyInterfaceProfilesToGrids();
+            }
+            
+            updateSimulation();
+            updateStatus();
+            
+            simulation.animationId = requestAnimationFrame(animate);
+        }
+
+        function updateSimulation() {
+            const ctx = simulation.ctx;
+            ctx.clearRect(0, 0, simulation.canvas.width, simulation.canvas.height);
+            
+            // GRID SYSTEM OVERVIEW:
+            // 1. Deforming Mesh: Resolution-dependent computational mesh that shows deformation
+            // 2. Layer Boundaries: Always visible layer outlines
+            // 3. Material Labels: Always visible text labels
+            
+            // Calculate dynamic bottom boundary position based on bottom-most layer
+            let bottomBoundaryY = 580; // Default fallback
+            if (simulation.layers.length > 0) {
+                // Find the bottom-most layer edge
+                const bottomLayer = simulation.layers[simulation.layers.length - 1];
+                bottomBoundaryY = bottomLayer.position + bottomLayer.thickness;
+            }
+            
+            // Keep bottom boundary at fixed vertical position
+            let animatedBottomBoundaryY = bottomBoundaryY;
+            
+            // Legacy offset no longer needed with co-shearing; keep zero to avoid desync
+            const patternShift = 0;
+
+            // Visual thickness of the rigid bottom boundary (double the previous 20px)
+            const bottomBarHeight = 40;
+            const bottomBarTopY = animatedBottomBoundaryY; // draw below boundary line
+            
+
+            
+            // Draw RIGID boundaries (top and bottom walls) - thicker and darker
+            ctx.fillStyle = '#222';
+            ctx.fillRect(0, 0, simulation.canvas ? simulation.canvas.width : 800, 20);
+            
+            // Add stipple texture to top boundary for consistency
+            ctx.fillStyle = '#444';
+            for (let x = 0; x < (simulation.canvas ? simulation.canvas.width : 800); x += 8) {
+                for (let y = 0; y < 20; y += 8) {
+                    if ((Math.floor(x / 8) + Math.floor(y / 8)) % 2 === 0) {
+                        ctx.fillRect(x, y, 4, 4);
+                    }
+                }
+            }
+            
+            // Draw bottom boundary at the animated position with stipple texture
+            ctx.fillStyle = '#222';
+            
+            // Draw the bottom boundary base bar (full width) with sliding offset synced to shear
+            const width = simulation.canvas ? simulation.canvas.width : 800;
+            const bottomOffset = ((simulation.shearGamma * (animatedBottomBoundaryY - 20)) % width + width) % width;
+            if (bottomOffset > 0) {
+                ctx.fillRect(bottomOffset, bottomBarTopY, width - bottomOffset, bottomBarHeight);
+                ctx.fillRect(0, bottomBarTopY, bottomOffset, bottomBarHeight);
+            } else {
+                ctx.fillRect(0, bottomBarTopY, width, bottomBarHeight);
+            }
+            
+            // Add stipple texture to make motion visible - only one pattern
+            ctx.fillStyle = '#444';
+            // Draw 45° stripe texture clipped to the band and translated smoothly
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(0, bottomBarTopY, width, bottomBarHeight);
+            ctx.clip();
+            // Create a small diagonal stripe pattern
+            const stripeSpacing = 12; // pixels between stripes
+            const stripeCanvas = document.createElement('canvas');
+            stripeCanvas.width = stripeSpacing * 2;
+            stripeCanvas.height = stripeSpacing * 2;
+            const pctx = stripeCanvas.getContext('2d');
+            pctx.clearRect(0, 0, stripeCanvas.width, stripeCanvas.height);
+            pctx.strokeStyle = '#444';
+            pctx.lineWidth = 4;
+            pctx.beginPath();
+            // Two diagonals to tile a 45° pattern
+            pctx.moveTo(-stripeSpacing, stripeSpacing);
+            pctx.lineTo(stripeSpacing, -stripeSpacing);
+            pctx.moveTo(0, stripeSpacing * 2);
+            pctx.lineTo(stripeSpacing * 2, 0);
+            pctx.stroke();
+            const pattern = ctx.createPattern(stripeCanvas, 'repeat');
+            // Translate pattern continuously to animate to the right with strain
+            ctx.translate(bottomOffset, 0);
+            ctx.fillStyle = pattern;
+            ctx.fillRect(-1000, bottomBarTopY, width + 2000, bottomBarHeight);
+            ctx.restore();
+            
+            // Add labels for rigid boundaries
+            ctx.fillStyle = '#FFF';
+            ctx.font = '12px Arial';
+            ctx.fillText('RIGID TOP BOUNDARY', 10, 15);
+            ctx.fillText('RIGID BOTTOM BOUNDARY', 10, bottomBarTopY + 15);
+            
+            const gamma = simulation.shearGamma;
+            const topY = 20;
+            if (simulation.extendedDomain) {
+                // Draw once across extended domain with viewport pan
+                const domainWidth = width * getDomainFactor();
+                const panOffset = Math.max(0, Math.min(domainWidth - width, simulation.viewPan * (domainWidth - width)));
+                ctx.save();
+                ctx.translate(-panOffset, 0);
+                simulation.layers.forEach((layer, idx) => {
+                    layer.__renderGamma = gamma;
+                    layer.__renderTop = topY;
+                    layer.__renderWidth = domainWidth;
+                    layer.__renderShift = 0;
+                    const drawInterfaces = !simulation.showLayerFills;
+                    layer.__drawTopBoundary = drawInterfaces || (idx === 0);
+                    layer.__drawBottomBoundary = (idx === simulation.layers.length - 1);
+                    layer.draw(ctx);
+                    delete layer.__renderGamma; delete layer.__renderTop; delete layer.__renderWidth; delete layer.__renderShift; delete layer.__drawTopBoundary; delete layer.__drawBottomBoundary;
+                });
+                ctx.restore();
+            } else {
+                // Legacy tiling mode for performance and compatibility
+                const domainHeight = (animatedBottomBoundaryY - topY);
+                const minSpan = Math.max(1, Math.floor(simulation.offscreenSpan));
+                const requiredSpan = Math.max(1, Math.ceil(Math.abs(gamma) * domainHeight / width));
+                const span = Math.max(minSpan, requiredSpan);
+                const totalSpanWidth = (2 * span + 1) * width;
+                const panOffset = (simulation.viewPan - 0.5) * (totalSpanWidth - width);
+                for (let k = -span; k <= span; k++) {
+                    const shift = k * width - panOffset;
+                    ctx.save();
+                    simulation.layers.forEach((layer, idx) => {
+                        layer.__renderGamma = gamma;
+                        layer.__renderTop = topY;
+                        layer.__renderWidth = width;
+                        layer.__renderShift = shift;
+                        const drawInterfaces = !simulation.showLayerFills;
+                        layer.__drawTopBoundary = drawInterfaces || (idx === 0);
+                        layer.__drawBottomBoundary = (idx === simulation.layers.length - 1);
+                        layer.draw(ctx);
+                        delete layer.__renderGamma; delete layer.__renderTop; delete layer.__renderWidth; delete layer.__renderShift; delete layer.__drawTopBoundary; delete layer.__drawBottomBoundary;
+                    });
+                    ctx.restore();
+                }
+            }
+            
+                         // Removed incorrect "Shear Direction" label
+             
+             // Draw fixed material labels on the right side (at distinct z-index)
+             if (simulation.showLayerLabels) {
+             ctx.globalAlpha = 1.0;
+             ctx.font = 'bold 12px Arial';
+             ctx.textAlign = 'left';
+             
+             simulation.layers.forEach((layer, index) => {
+                                    // Calculate fixed position on the right side - moved closer to layers
+                const labelX = 650; // Moved left to be closer to the layers
+                
+                // Calculate vertical position based on actual layer thickness and position
+                const layerCenterY = layer.position + (layer.thickness / 2); // Center of the layer
+                const labelY = layerCenterY; // Position label at layer center
+               
+                                    // Draw text only (no background or border)
+                ctx.fillStyle = '#000';
+                ctx.fillText(layer.material.toUpperCase(), labelX, labelY);
+             });
+            }
+         }
+
+        function updateStatus() {
+            const status = document.getElementById('status');
+            status.innerHTML = `
+                Time: ${simulation.time.toFixed(2)}s<br>
+                Total Strain: ${(simulation.totalStrain * 100).toFixed(2)}%<br>
+                Layers: ${simulation.layers.length}
+            `;
+        }
+
+        // Initialize when page loads
+        window.onload = function() {
+            initializeSimulation();
+            updateSimulation();
+            // Wire UI for interface noise
+            const noiseSlider = document.getElementById('interfaceNoise');
+            const noiseLabel = document.getElementById('noiseValue');
+            const noiseCorrSlider = document.getElementById('noiseCorrelation');
+            const noiseCorrLabel = document.getElementById('noiseCorrValue');
+            const offscreenSpanSlider = document.getElementById('offscreenSpan');
+            const offscreenSpanLabel = document.getElementById('offscreenSpanValue');
+            const panSlider = document.getElementById('panSlider');
+            const extendedToggle = document.getElementById('extendedDomainToggle');
+            if (noiseSlider && noiseLabel) {
+                const updateNoise = () => {
+                    simulation.interfaceNoise = parseFloat(noiseSlider.value);
+                    noiseLabel.textContent = simulation.interfaceNoise.toFixed(2);
+                    // Reseed noise so each application is unique
+                    simulation.noiseSeed = (Math.random() * 4294967296) >>> 0;
+                    rebuildInterfaceProfiles();
+                    applyInterfaceProfilesToGrids();
+                    enforceInterfaceConformance();
+                    enforceColumnwiseThickness();
+                    updateSimulation();
+                };
+                noiseSlider.addEventListener('input', updateNoise);
+                updateNoise();
+            }
+
+            if (noiseCorrSlider && noiseCorrLabel) {
+                const updateCorr = () => {
+                    simulation.noiseCorrelation = parseFloat(noiseCorrSlider.value);
+                    noiseCorrLabel.textContent = simulation.noiseCorrelation.toFixed(1);
+                    // Changing correlation reshapes profiles
+                    rebuildInterfaceProfiles();
+                    applyInterfaceProfilesToGrids();
+                    enforceInterfaceConformance();
+                    enforceColumnwiseThickness();
+                    updateSimulation();
+                };
+                noiseCorrSlider.addEventListener('input', updateCorr);
+                updateCorr();
+            }
+            // Noise density wiring
+            const noiseDensitySlider = document.getElementById('noiseDensity');
+            const noiseDensityLabel = document.getElementById('noiseDensityValue');
+            if (noiseDensitySlider && noiseDensityLabel) {
+                const updateDensity = () => {
+                    simulation.noiseDensity = parseFloat(noiseDensitySlider.value);
+                    noiseDensityLabel.textContent = simulation.noiseDensity.toFixed(2);
+                    rebuildInterfaceProfiles();
+                    applyInterfaceProfilesToGrids();
+                    enforceInterfaceConformance();
+                    enforceColumnwiseThickness();
+                    updateSimulation();
+                };
+                noiseDensitySlider.addEventListener('input', updateDensity);
+                updateDensity();
+            }
+            if (offscreenSpanSlider && offscreenSpanLabel) {
+                const updateSpan = () => {
+                    simulation.offscreenSpan = parseInt(offscreenSpanSlider.value, 10);
+                    offscreenSpanLabel.textContent = String(simulation.offscreenSpan);
+                    // Update pan slider thumb width to represent visible window fraction
+                    updatePanThumbWidth();
+                    if (simulation.extendedDomain) {
+                        repositionLayersAfterThicknessChange();
+                    }
+                    updateSimulation();
+                };
+                offscreenSpanSlider.addEventListener('input', updateSpan);
+                updateSpan();
+            }
+            if (extendedToggle) {
+                const updateExtended = () => {
+                    simulation.extendedDomain = !!extendedToggle.checked;
+                    // Rebuild grids when toggling extended mode
+                    repositionLayersAfterThicknessChange();
+                    // Rebuild interface profiles for new total column count
+                    rebuildInterfaceProfiles();
+                    applyInterfaceProfilesToGrids();
+                    enforceInterfaceConformance();
+                    enforceColumnwiseThickness();
+                    updatePanThumbWidth();
+                    updateSimulation();
+                };
+                extendedToggle.addEventListener('change', updateExtended);
+                updateExtended();
+            }
+            if (panSlider) {
+                const updatePan = () => {
+                    simulation.viewPan = Math.max(0, Math.min(1, parseFloat(panSlider.value)));
+                    updateSimulation();
+                };
+                panSlider.addEventListener('input', updatePan);
+                updatePan();
+            }
+            // Maintain proportional thumb on resize
+            window.addEventListener('resize', () => updatePanThumbWidth());
+            function updatePanThumbWidth() {
+                const span = Math.max(1, Math.floor(simulation.offscreenSpan || 1));
+                // visible fraction is 1/(2*span+1)
+                const frac = 1 / (2 * span + 1);
+                const slider = document.getElementById('panSlider');
+                if (slider) {
+                    const px = Math.max(16, Math.floor(slider.clientWidth * frac));
+                    slider.style.setProperty('--thumb-w', px + 'px');
+                }
+            }
+        };
+
+        // Update grid resolution
+        document.getElementById('resolution').addEventListener('change', function() {
+            simulation.gridResolution = parseInt(this.value);
+            repositionLayersAfterThicknessChange(); // Ensure proper positioning after grid change
+            updateSimulation();
+        });
+        
+        // Add event listeners for range sliders to update displayed values
+        document.getElementById('temperature').addEventListener('input', function() {
+            document.getElementById('tempValue').textContent = this.value;
+        });
+        
+        document.getElementById('strainRate').addEventListener('input', function() {
+            document.getElementById('strainValue').textContent = parseFloat(this.value).toFixed(3);
+        });
+        
+        document.getElementById('resolution').addEventListener('input', function() {
+            document.getElementById('resValue').textContent = this.value;
+        });
+        
+        // Grid line color picker event listener
+        document.getElementById('gridLineColor').addEventListener('change', function() {
+            simulation.gridLineColor = this.value;
+            updateSimulation(); // Redraw immediately when color changes
+        });
+        // Grid line visibility toggle
+        const showGridCheckbox = document.getElementById('showGridLines');
+        if (showGridCheckbox) {
+            showGridCheckbox.addEventListener('change', function() {
+                simulation.showGridLines = !!this.checked;
+                updateSimulation();
+            });
+            simulation.showGridLines = !!showGridCheckbox.checked;
+        }
+        // Material label visibility toggle
+        const showLabelsCheckbox = document.getElementById('showLayerLabels');
+        if (showLabelsCheckbox) {
+            showLabelsCheckbox.addEventListener('change', function() {
+                simulation.showLayerLabels = !!this.checked;
+                updateSimulation();
+            });
+            simulation.showLayerLabels = !!showLabelsCheckbox.checked;
+        }
+        // Layer fill visibility toggle
+        const showFillsCheckbox = document.getElementById('showLayerFills');
+        if (showFillsCheckbox) {
+            showFillsCheckbox.addEventListener('change', function() {
+                simulation.showLayerFills = !!this.checked;
+                updateSimulation();
+            });
+            simulation.showLayerFills = !!showFillsCheckbox.checked;
+        }
+        
+    </script>
+</body>
+</html>

@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Layer Folding – Edge-Driven Ping-Pong + Hold</title>
+<style>
+  :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  body{margin:0; background:#111; color:#eee; display:grid; grid-template-rows:auto 1fr;}
+  header{padding:10px 14px; display:flex; gap:16px; align-items:center; flex-wrap:wrap; background:#181818; border-bottom:1px solid #333;}
+  label{display:flex; align-items:center; gap:8px; font-size:14px;}
+  input[type=range]{width:160px}
+  #c{width:100%; height:100%; display:block; background:#0b0b0b;}
+  .pill{padding:.35rem .6rem; border:1px solid #333; border-radius:999px; background:#141414;}
+  .small{font-size:12px; opacity:.7}
+  button{background:#222; color:#eee; border:1px solid #444; padding:.45rem .7rem; border-radius:8px; cursor:pointer}
+  button:hover{background:#2a2a2a}
+</style>
+</head>
+<body>
+<header>
+  <div class="pill">Edge-driven layered compression (Canvas)</div>
+  <label>Compression <input id="comp" type="range" min="0" max="0.6" step="0.001" value="0.30"><span id="compv" class="small">30%</span></label>
+  <label>Wavelength <input id="wave" type="range" min="30" max="400" step="1" value="180"><span id="wavev" class="small">180 px</span></label>
+  <label>Amplitude <input id="amp" type="range" min="0" max="90" step="1" value="50"><span id="ampv" class="small">50 px</span></label>
+  <label>Slip/layer <input id="slip" type="range" min="0" max="0.6" step="0.01" value="0.12"><span id="slipv" class="small">0.12 rad</span></label>
+  <label>Roughness <input id="rough" type="range" min="0" max="1" step="0.01" value="0.20"><span id="roughv" class="small">0.20</span></label>
+  <label>Speed <input id="speed" type="range" min="0.2" max="3" step="0.01" value="1.0"><span id="speedv" class="small">1.0×</span></label>
+  <button id="randomize">Randomize Layers</button>
+  <button id="toggle">▶︎ Play</button>
+</header>
+<canvas id="c"></canvas>
+
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const DPR = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  let W=0, H=0;
+
+  const ui = {
+    comp:  document.getElementById('comp'),
+    wave:  document.getElementById('wave'),
+    amp:   document.getElementById('amp'),
+    slip:  document.getElementById('slip'),
+    rough: document.getElementById('rough'),
+    speed: document.getElementById('speed'),
+    compv: document.getElementById('compv'),
+    wavev: document.getElementById('wavev'),
+    ampv:  document.getElementById('ampv'),
+    slipv: document.getElementById('slipv'),
+    roughv:document.getElementById('roughv'),
+    speedv:document.getElementById('speedv'),
+    randomize: document.getElementById('randomize'),
+    toggle: document.getElementById('toggle')
+  };
+
+  function RNG(seed=1234567){ let s=seed>>>0; return ()=>{s^=s<<13; s^=s>>>17; s^=s<<5; return (s>>>0)/4294967296;} }
+  function makeNoise1D(n=256, rng=RNG()){
+    const v=new Float32Array(n+1); for(let i=0;i<n+1;i++) v[i]=rng()*2-1;
+    return x=>{const t=x*n,i=Math.floor(t),f=t-i,a=v[i],b=v[i+1],u=f*f*(3-2*f); return a*(1-u)+b*u;};
+  }
+
+  let layers=[]; let seedBase=Math.floor(Math.random()*1e9);
+  function randomizeLayers(){
+    const rng=RNG(seedBase); layers=[]; const n=18; let y=20;
+    for(let i=0;i<n;i++){
+      const t=10+Math.floor(rng()*20);
+      const hue=(i%2===0)?0:220; const col=`hsl(${hue} 60% 55%)`;
+      const phase=rng()*Math.PI*2; const roughSeed=Math.floor(rng()*1e9);
+      layers.push({y0:y,t,color:col,phase,roughSeed}); y+=t;
+    }
+  }
+
+  function resize(){
+    const rect=canvas.getBoundingClientRect();
+    W=Math.floor(rect.width*DPR); H=Math.floor(rect.height*DPR);
+    canvas.width=W; canvas.height=H; ctx.setTransform(DPR,0,0,DPR,0,0);
+    draw();
+  }
+  window.addEventListener('resize', resize, {passive:true});
+
+  // --- ping-pong with holds ---
+  let playing=false, t0=0;
+  const basePeriod = 2800;      // ms for up or down segment at speed=1
+  const holdFrac   = 0.18;      // fraction of basePeriod to hold at ends
+  function easeInOut(t){ return t<0.5 ? 2*t*t : 1 - Math.pow(-2*t+2,2)/2; }
+
+  // progress p(t): 0→1 (fold-in) →hold →1→0 (unfold) →hold → repeat
+  function progressWithHold(ms, speed){
+    const up = basePeriod / speed;
+    const hold = holdFrac * up;
+    const down = up;
+    const hold2 = hold;
+    const T = up + hold + down + hold2;
+    const t = (ms % T);
+
+    if (t < up) {
+      return easeInOut(t / up);                 // 0 → 1
+    } else if (t < up + hold) {
+      return 1;                                  // hold at 1
+    } else if (t < up + hold + down) {
+      const u = (t - (up + hold)) / down;
+      return easeInOut(1 - u);                   // 1 → 0
+    } else {
+      return 0;                                  // hold at 0
+    }
+  }
+
+  // --- edge-driven mask ---
+  // weight(x) = 1 near edges when fronts have reached x; 0 in the untouched center.
+  // fronts move symmetrically from both edges to the center as penetration p∈[0,1] grows.
+  const soft = 0.12; // softness of the front (as a fraction of half-width)
+  function edgeWeight(x, penetration, strength){
+    const half = W/2;
+    const s = Math.min(x, W - x) / half;   // 0 at edge → 1 at center
+    const p  = Math.min(Math.max(penetration, 0), 1);   // how far fronts have moved in (0..1)
+    // w = smooth ramp from 0→1 when s <= p (i.e., inside the covered region)
+    let t = (p - s) / soft;                // negative before the front, positive inside
+    t = Math.max(0, Math.min(1, t));       // clamp
+    t = t*t*(3-2*t);                       // smoothstep
+    return t * strength;                   // also ramp intensity with global strength
+  }
+
+  function yMid(x, y0, i, params, roughF, pen, str){
+    const { c, A, lambda, slip, rough, phase0 } = params;
+    const k = (2*Math.PI)/Math.max(10,lambda);
+    const a = edgeWeight(x, pen, str);     // 0..1 local weight from edges
+    const cLoc   = c    * a;
+    const ALoc   = A    * a;
+    const slipLoc= slip * a;
+    const roughLoc=rough* a;
+
+    const base = (1 - cLoc) * y0;
+    const grow = (1 - Math.exp(-6*cLoc));
+    const r = roughLoc * roughF((x % W)/W);
+    const phi = i*slipLoc + phase0;
+    return base + (ALoc*grow) * Math.sin(k*x + phi) + 10*r;
+  }
+
+  function drawLayer(i, layer, params, roughF, pen, str){
+    const step=4; ctx.fillStyle=layer.color; ctx.beginPath();
+    for(let x=0;x<=W;x+=step){ const ym=yMid(x,layer.y0,i,params,roughF,pen,str); const yt=ym-layer.t/2; if(x===0) ctx.moveTo(0,yt); else ctx.lineTo(x,yt); }
+    for(let x=W;x>=0;x-=step){ const ym=yMid(x,layer.y0,i,params,roughF,pen,str); const yb=ym+layer.t/2; ctx.lineTo(x,yb); }
+    ctx.closePath(); ctx.fill();
+    ctx.save(); ctx.clip(); ctx.globalAlpha=0.06; ctx.fillStyle='#000'; ctx.fillRect(0,0,W,H); ctx.restore();
+  }
+
+  function readTargets(){
+    const c=parseFloat(ui.comp.value), lambda=parseFloat(ui.wave.value), A=parseFloat(ui.amp.value),
+          slip=parseFloat(ui.slip.value), rough=parseFloat(ui.rough.value), speed=parseFloat(ui.speed.value);
+    ui.compv.textContent=Math.round(c*100)+'%'; ui.wavev.textContent=Math.round(lambda)+' px';
+    ui.ampv.textContent=Math.round(A)+' px'; ui.slipv.textContent=slip.toFixed(2)+' rad';
+    ui.roughv.textContent=rough.toFixed(2); ui.speedv.textContent=speed.toFixed(2)+'×';
+    return {c, lambda, A, slip, rough, speed};
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    const g=ctx.createLinearGradient(0,0,0,H); g.addColorStop(0,'#0b0b0b'); g.addColorStop(1,'#101010'); ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+
+    const tgt=readTargets();
+    const now = performance.now() - t0;
+    const p = playing ? progressWithHold(now, tgt.speed) : 0; // 0..1 with holds
+    const strength = p;               // intensity ramps with same progress
+    const penetration = p;            // fronts move in with same progress
+
+    const params={ c:tgt.c, lambda:tgt.lambda, A:tgt.A, slip:tgt.slip, rough:tgt.rough, phase0:0 };
+    const roughF=makeNoise1D(512, RNG(98765));
+
+    for(let i=0;i<layers.length;i++) drawLayer(i,layers[i],params,roughF,penetration,strength);
+
+    if(playing) requestAnimationFrame(draw);
+  }
+
+  ['comp','wave','amp','slip','rough','speed'].forEach(id=>ui[id].addEventListener('input', draw, {passive:true}));
+  ui.randomize.addEventListener('click', ()=>{ seedBase=Math.floor(Math.random()*1e9); randomizeLayers(); draw(); });
+  ui.toggle.addEventListener('click', ()=>{
+    playing=!playing;
+    if(playing){ t0=performance.now(); ui.toggle.textContent='❚❚ Pause'; requestAnimationFrame(draw); }
+    else { ui.toggle.textContent='▶︎ Play'; draw(); }
+  });
+
+  randomizeLayers();
+  resize();
+})();
+</script>
+</body>
+</html>

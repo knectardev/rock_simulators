@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Voronoi → Natural-Grain Relaxer v1.3 (phases + morph + state)</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif; background:#0b1020; color:#e6e6ea; }
+    .wrap { display:grid; grid-template-columns: 360px 1fr; min-height: 100vh; }
+    .panel { padding: 16px; border-right: 1px solid #1b2240; background:#0f152c; overflow:auto; }
+    .panel h1 { font-size: 18px; margin: 0 0 12px; }
+    .panel .group { margin-bottom: 14px; }
+    .panel label { display:flex; justify-content:space-between; font-size:13px; gap:12px; margin:6px 0; }
+    .panel input[type="range"] { width: 180px; }
+    .panel button { background:#1d2a5b; color:#fff; border:0; padding:8px 10px; border-radius:10px; cursor:pointer; }
+    .panel button:active { transform: translateY(1px); }
+    .row { display:flex; align-items:center; gap:8px; }
+    .row > * { flex: 1; }
+    .mini { font-size:11px; color:#9aa3c7; }
+    canvas { display:block; width:100%; height:100%; background:#0b1020; }
+    .phaseCard { border:1px solid #1b2240; border-radius:10px; padding:10px; margin-bottom:10px; background:#0e1733; }
+  </style>
+  <script src="https://unpkg.com/d3-delaunay@6.0.2/dist/d3-delaunay.min.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <div class="panel">
+    <h1>Voronoi → Natural-Grain Relaxer <span class="mini" style="font-weight:400">v1.3</span></h1>
+
+    <div class="group">
+      <label>Cells <span><output id="cellsOut">450</output></span></label>
+      <input id="cells" type="range" min="50" max="1200" value="450" step="10" />
+    </div>
+    <div class="group">
+      <label>Lloyd (centroid) iters <span><output id="lloydOut">2</output></span></label>
+      <input id="lloyd" type="range" min="0" max="10" value="2" />
+      <div class="mini">Smooths cell size/shape while preserving topology.</div>
+    </div>
+    <div class="group">
+      <label>Boundary relax iters <span><output id="relaxOut">10</output></span></label>
+      <input id="relax" type="range" min="0" max="60" value="10" />
+      <div class="mini">Curvature-driven (Laplacian) smoothing on polygon points.</div>
+    </div>
+    <div class="group">
+      <label>Relax step (α) <span><output id="alphaOut">0.18</output></span></label>
+      <input id="alpha" type="range" min="0" max="0.5" value="0.18" step="0.01" />
+    </div>
+    <div class="group">
+      <label>Subdivide edges <span><output id="subdivOut">4</output></span></label>
+      <input id="subdiv" type="range" min="0" max="10" value="4" />
+      <div class="mini">Adds intermediate points so curves can bend naturally.</div>
+    </div>
+    <div class="group">
+      <label>Seed jitter <span><output id="jitterOut">0.0</output></span></label>
+      <input id="jitter" type="range" min="0" max="10" value="0" step="0.5" />
+    </div>
+
+    <div class="group" style="margin-top:18px;">
+      <label class="row" style="gap:12px; align-items:center;">
+        <span>Animate changes</span>
+        <input id="animateToggle" type="checkbox" checked />
+        <span>Duration (ms)</span>
+        <input id="animMs" type="range" min="150" max="2000" value="700" step="50" />
+        <output id="animMsOut">700</output>
+      </label>
+      <div class="mini">When any slider changes, smoothly morph to the new state.</div>
+    </div>
+
+    <div id="phasesUI" class="group">
+      <div class="mini" style="margin-bottom:8px;">Mineral phases (independent controls for proportion, aspect ratio, and alignment)</div>
+      <!-- Phase cards injected by JS -->
+    </div>
+
+    <div class="group">
+      <button id="regen">Regenerate geometry</button>
+      <button id="exportSvg">Export SVG</button>
+    </div>
+
+    <p class="mini">Pipeline: Voronoi → (optional) Lloyd → subdivision → curvature smoothing → <em>per‑phase anisotropic transform</em> (aspect + alignment) → render. Proportions animate via per‑polygon color tweening.</p>
+  </div>
+  <canvas id="cnv"></canvas>
+</div>
+<script>
+const canvas = document.getElementById('cnv');
+const ctx = canvas.getContext('2d');
+let W, H; function resize(){ W = canvas.width = canvas.clientWidth; H = canvas.height = canvas.clientHeight; } window.addEventListener('resize', ()=>{ resize(); drawFrame(0); }); resize();
+
+const ui = id => document.getElementById(id);
+['cells','lloyd','relax','alpha','subdiv','jitter'].forEach(id=>{
+  ui(id).addEventListener('input', ()=>{ ui(id+'Out').textContent = ui(id).value; saveState(); });
+});
+ui('alphaOut').textContent = (+ui('alpha').value).toFixed(2);
+ui('animMs').addEventListener('input', ()=> { ui('animMsOut').textContent = ui('animMs').value; saveState(); });
+ui('animateToggle').addEventListener('change', saveState);
+
+ui('regen').addEventListener('click', ()=>{ regenerate(); saveState(); });
+ui('exportSvg').addEventListener('click', exportSVG);
+
+// ----------------------- Phases (minerals) -----------------------
+const defaultPhases = [
+  { name:'Phase A', color:'#5e8bd6', weight:0.34, aspect:1.0, angle:0 },
+  { name:'Phase B', color:'#69c39a', weight:0.33, aspect:1.0, angle:30 },
+  { name:'Phase C', color:'#e2a33a', weight:0.33, aspect:1.0, angle:60 }
+];
+let phasesFrom = JSON.parse(JSON.stringify(defaultPhases));
+let phasesTo   = JSON.parse(JSON.stringify(defaultPhases));
+let phasesCur  = JSON.parse(JSON.stringify(defaultPhases));
+
+function buildPhasesUI(){
+  const root = document.getElementById('phasesUI');
+  root.innerHTML = '';
+  phasesCur.forEach((ph,idx)=>{
+    const card = document.createElement('div'); card.className = 'phaseCard';
+    card.innerHTML = `
+      <div class="row" style="align-items:center; gap:10px;">
+        <strong style="flex:0 0 70px;">${ph.name}</strong>
+        <input type="color" id="p${idx}Color" value="${ph.color}" style="width:36px; height:24px; border:none; background:transparent;" />
+        <label>Proportion <output id="p${idx}WOut">${Math.round(ph.weight*100)}</output>%</label>
+        <input type="range" id="p${idx}W" min="0" max="100" value="${Math.round(ph.weight*100)}" />
+      </div>
+      <label>Aspect ratio (elongation) <span><output id="p${idx}AOut">${ph.aspect.toFixed(2)}</output></span></label>
+      <input type="range" id="p${idx}A" min="0.2" max="4" step="0.01" value="${ph.aspect}" />
+      <label>Alignment (°) <span><output id="p${idx}AngOut">${Math.round(ph.angle)}</output></span></label>
+      <input type="range" id="p${idx}Ang" min="0" max="180" step="1" value="${ph.angle}" />
+    `;
+    root.appendChild(card);
+  });
+  // wire events
+  phasesCur.forEach((ph,idx)=>{
+    ui(`p${idx}Color`).addEventListener('input', ()=> { phasesTo[idx].color = ui(`p${idx}Color`).value; kickAnimate('phases'); saveState(); });
+    ui(`p${idx}W`).addEventListener('input', ()=> { ui(`p${idx}WOut`).textContent = ui(`p${idx}W`).value; updateWeightsFromUI(); saveState(); });
+    ui(`p${idx}A`).addEventListener('input', ()=> { phasesTo[idx].aspect = +ui(`p${idx}A`).value; ui(`p${idx}AOut`).textContent = phasesTo[idx].aspect.toFixed(2); kickAnimate('phases'); saveState(); });
+    ui(`p${idx}Ang`).addEventListener('input', ()=> { phasesTo[idx].angle = +ui(`p${idx}Ang`).value; ui(`p${idx}AngOut`).textContent = Math.round(phasesTo[idx].angle); kickAnimate('phases'); saveState(); });
+  });
+}
+
+function updateWeightsFromUI(){
+  const vals = phasesCur.map((_,i)=> +ui(`p${i}W`).value);
+  const sum = vals.reduce((a,b)=>a+b,0) || 1; 
+  vals.forEach((v,i)=> phasesTo[i].weight = v/sum);
+  vals.forEach((v,i)=> ui(`p${i}WOut`).textContent = Math.round( (phasesTo[i].weight*100) ));
+  remapPolyPhasesWithAnimation();
+}
+
+function kickAnimate(){
+  if(!ui('animateToggle').checked){ phasesFrom = clonePhases(phasesTo); phasesCur = clonePhases(phasesTo); drawFrame(0); return; }
+  phasesFrom = clonePhases(phasesCur);
+  animStart = performance.now();
+  animActive = true; requestAnimationFrame(tick);
+}
+function clonePhases(src){ return JSON.parse(JSON.stringify(src)); }
+
+// ----------------------- Geometry generation -----------------------
+let basePolygons = [];   // original, smoothed polygons
+let centroids = [];      // centroid per polygon
+let polyKey = [];        // stable random key [0,1)
+let polyPhase = [];      // assigned phase index per polygon
+let polyColorTween = []; // per-poly color tween {t0, dur, c0,c1, active}
+
+function regenerate(){
+  const n = +ui('cells').value;
+  const jitter = +ui('jitter').value;
+  let sites = Array.from({length:n}, ()=>[Math.random()*W, Math.random()*H]);
+  if(jitter>0){ sites = sites.map(([x,y])=>[x + (Math.random()-0.5)*jitter, y + (Math.random()-0.5)*jitter]); }
+
+  const lloydIters = +ui('lloyd').value;
+  let delaunay = d3.Delaunay.from(sites);
+  let voronoi = delaunay.voronoi([0,0,W,H]);
+  for(let k=0;k<lloydIters;k++){
+    sites = sites.map((s,i)=> centroid(voronoi.cellPolygon(i)));
+    delaunay = d3.Delaunay.from(sites);
+    voronoi = delaunay.voronoi([0,0,W,H]);
+  }
+  basePolygons = []; centroids = []; polyKey = []; polyPhase = []; polyColorTween = [];
+  for(let i=0;i<sites.length;i++){
+    const poly = voronoi.cellPolygon(i); if(!poly) continue;
+    let pts = poly.slice(0, -1);
+    const subdivN = +ui('subdiv').value; if(subdivN>0) pts = subdivide(pts, subdivN);
+    const relaxIters = +ui('relax').value; const alpha = +ui('alpha').value;
+    for(let r=0;r<relaxIters;r++) pts = laplacianSmooth(pts, alpha);
+    basePolygons.push(pts);
+    const c = centroidClosed(pts); centroids.push(c);
+    polyKey.push(Math.random());
+    polyColorTween.push({active:false});
+  }
+  remapPolyPhasesWithAnimation(true);
+  drawFrame(0);
+}
+
+function centroid(pts){
+  let x=0,y=0,a=0; for(let i=0;i<pts.length-1;i++){ const [x0,y0]=pts[i], [x1,y1]=pts[i+1]; const cross=x0*y1-x1*y0; a+=cross; x+=(x0+x1)*cross; y+=(y0+y1)*cross; }
+  a*=0.5; if(Math.abs(a)<1e-9) return pts[0]; return [x/(6*a), y/(6*a)];
+}
+function centroidClosed(pts){
+  let x=0,y=0,a=0; for(let i=0;i<pts.length;i++){ const [x0,y0]=pts[i], [x1,y1]=pts[(i+1)%pts.length]; const cross=x0*y1-x1*y0; a+=cross; x+=(x0+x1)*cross; y+=(y0+y1)*cross; }
+  a*=0.5; if(Math.abs(a)<1e-9) return pts[0]; return [x/(6*a), y/(6*a)];
+}
+
+function subdivide(pts, n){
+  const out = []; for(let i=0;i<pts.length;i++){ const a=pts[i], b=pts[(i+1)%pts.length]; for(let k=0;k<n;k++){ const t=k/n; out.push([a[0]*(1-t)+b[0]*t, a[1]*(1-t)+b[1]*t]); }} return out;
+}
+function laplacianSmooth(pts, alpha){
+  const N = pts.length; const out = new Array(N); for(let i=0;i<N;i++){ const p=pts[i], pPrev=pts[(i-1+N)%N], pNext=pts[(i+1)%N]; const mx=(pPrev[0]+pNext[0])*0.5, my=(pPrev[1]+pNext[1])*0.5; out[i]=[p[0]+alpha*(mx-p[0]), p[1]+alpha*(my-p[1])]; } return out;
+}
+
+// ----------------------- Phase assignment & animation -----------------------
+function remapPolyPhasesWithAnimation(initial=false){
+  const w = phasesTo.map(p=>p.weight); const sum = w.reduce((a,b)=>a+b,0)||1; const norm = w.map(v=>v/sum);
+  const thresholds=[norm[0], norm[0]+norm[1], 1];
+  const dur = +ui('animMs').value;
+  for(let i=0;i<basePolygons.length;i++){
+    const key = polyKey[i];
+    const newPhase = (key < thresholds[0]) ? 0 : (key < thresholds[1] ? 1 : 2);
+    if(initial){ polyPhase[i] = newPhase; continue; }
+    if(newPhase !== polyPhase[i]){
+      const c0 = getPhaseColorAtPoly(i);
+      const c1 = hexToRgb(phasesTo[newPhase].color);
+      polyColorTween[i] = { active:true, t0:performance.now(), dur:dur, c0, c1 };
+      polyPhase[i] = newPhase;
+    }
+  }
+  if(ui('animateToggle').checked){ animActive = true; requestAnimationFrame(tick); }
+}
+
+function getPhaseColorAtPoly(i){
+  const tw = polyColorTween[i]; const now = performance.now();
+  if(tw && tw.active){ const t = Math.min(1, (now - tw.t0)/tw.dur); return mixRgb(tw.c0, tw.c1, t); }
+  const ph = polyPhase[i]; return hexToRgb(phasesCur[ph].color);
+}
+
+// ----------------------- Animation loop -----------------------
+let animStart = 0; let animActive = false;
+function tick(now){
+  const dur = +ui('animMs').value;
+  const t = Math.min(1, (now - animStart)/dur);
+  for(let i=0;i<phasesCur.length;i++){
+    phasesCur[i].aspect = lerpLog(phasesFrom[i].aspect, phasesTo[i].aspect, t);
+    phasesCur[i].angle  = lerpAngle(phasesFrom[i].angle, phasesTo[i].angle, t);
+    phasesCur[i].color  = rgbToHex(mixRgb(hexToRgb(phasesFrom[i].color), hexToRgb(phasesTo[i].color), t));
+    phasesCur[i].weight = phasesTo[i].weight;
+  }
+  let anyPolyTween=false; const nowTs = now;
+  for(let i=0;i<polyColorTween.length;i++){
+    const tw = polyColorTween[i]; if(tw && tw.active){
+      const pt = Math.min(1, (nowTs - tw.t0)/tw.dur); if(pt>=1){ tw.active=false; }
+      anyPolyTween = anyPolyTween || tw.active; 
+    }
+  }
+  drawFrame(t);
+  if(t<1 || anyPolyTween){ animActive = true; requestAnimationFrame(tick); } else { animActive=false; phasesFrom = clonePhases(phasesTo); saveState(); }
+}
+
+function drawFrame(){
+  ctx.clearRect(0,0,W,H);
+  const mats = phasesCur.map(ph=> makeAnisoMatrix(ph.aspect, ph.angle));
+  for(let i=0;i<basePolygons.length;i++){
+    const phIdx = polyPhase[i];
+    const mat = mats[phIdx];
+    const c = centroids[i];
+    const pts = basePolygons[i];
+    const transformed = applyMatrixToPolygonAround(pts, mat, c);
+    const tw = polyColorTween[i]; let fill;
+    if(tw && tw.active){ const pt = Math.min(1, (performance.now()-tw.t0)/tw.dur); fill = rgbToHex(mixRgb(tw.c0, tw.c1, pt)); }
+    else { fill = phasesCur[phIdx].color; }
+    drawSmoothPolygon(transformed, fill);
+  }
+}
+
+function drawSmoothPolygon(pts, fill){
+  if(!pts || pts.length<3) return;
+  ctx.beginPath();
+  const N = pts.length; function at(idx){ return pts[(idx+N)%N]; }
+  for(let i=0;i<N;i++){
+    const p0 = at(i-1), p1 = at(i), p2 = at(i+1), p3 = at(i+2);
+    const cp1x = p1[0] + (p2[0]-p0[0])/6; const cp1y = p1[1] + (p2[1]-p0[1])/6;
+    const cp2x = p2[0] - (p3[0]-p1[0])/6; const cp2y = p2[1] - (p3[1]-p1[1])/6;
+    if(i===0) ctx.moveTo(p1[0], p1[1]);
+    ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2[0], p2[1]);
+  }
+  ctx.closePath();
+  ctx.fillStyle = fill; ctx.fill();
+}
+
+// ----------------------- Matrices & math -----------------------
+function makeAnisoMatrix(aspect, angleDeg){
+  const a = Math.max(0.001, aspect);
+  const sx = a; const sy = 1/a; // area-preserving anisotropy
+  const th = angleDeg * Math.PI/180;
+  const c = Math.cos(th), s = Math.sin(th);
+  const m00 = c*c*sx + s*s*sy;
+  const m01 = c*s*(sx - sy);
+  const m10 = c*s*(sx - sy);
+  const m11 = s*s*sx + c*c*sy;
+  return [m00,m01,m10,m11];
+}
+function applyMatrixToPolygonAround(pts, m, ctr){
+  const out = new Array(pts.length); const [m00,m01,m10,m11] = m; const cx=ctr[0], cy=ctr[1];
+  for(let i=0;i<pts.length;i++){ const x=pts[i][0]-cx, y=pts[i][1]-cy; out[i] = [cx + m00*x + m01*y, cy + m10*x + m11*y]; }
+  return out;
+}
+function lerp(a,b,t){ return a + (b-a)*t; }
+function lerpLog(a,b,t){ return Math.exp( Math.log(Math.max(1e-6,a))*(1-t) + Math.log(Math.max(1e-6,b))*t ); }
+function lerpAngle(a,b,t){ let d = ((b - a + 540) % 360) - 180; return (a + d*t + 360) % 360; }
+function hexToRgb(h){ const x = h.replace('#',''); const bigint = parseInt(x,16); if(x.length===3){ const r=(bigint>>8)&0xF, g=(bigint>>4)&0xF, b=bigint&0xF; return {r:r*17,g:g*17,b:b*17}; } return {r:(bigint>>16)&255, g:(bigint>>8)&255, b:bigint&255}; }
+function rgbToHex({r,g,b}){ const h=(v)=> ('0'+v.toString(16)).slice(-2); return '#'+h(r)+h(g)+h(b); }
+function mixRgb(c1,c2,t){ return { r: Math.round(lerp(c1.r,c2.r,t)), g: Math.round(lerp(c1.g,c2.g,t)), b: Math.round(lerp(c1.b,c2.b,t)) }; }
+
+// ----------------------- SVG export -----------------------
+function exportSVG(){
+  const mats = phasesCur.map(ph=> makeAnisoMatrix(ph.aspect, ph.angle));
+  const parts = [`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" fill="none">`];
+  for(let i=0;i<basePolygons.length;i++){
+    const phIdx = polyPhase[i]; const mat = mats[phIdx]; const c = centroids[i];
+    const poly = applyMatrixToPolygonAround(basePolygons[i], mat, c);
+    const d = pathDataFromPolygon(poly);
+    let fill;
+    const tw = polyColorTween[i]; if(tw && tw.active){ const pt = Math.min(1, (performance.now()-tw.t0)/tw.dur); fill = rgbToHex(mixRgb(tw.c0, tw.c1, pt)); } else { fill = phasesCur[phIdx].color; }
+    parts.push(`<path d="${d}" fill="${fill}"/>`);
+  }
+  parts.push('</svg>');
+  const blob = new Blob([parts.join('\n')], {type:'image/svg+xml'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download='relaxed_voronoi_aniso.svg'; a.click(); URL.revokeObjectURL(url);
+}
+
+function pathDataFromPolygon(pts){
+  const N = pts.length; const out = []; function at(idx){ return pts[(idx+N)%N]; }
+  const m = at(0); out.push(`M ${m[0].toFixed(2)} ${m[1].toFixed(2)}`);
+  for(let i=0;i<N;i++){
+    const p0=at(i-1), p1=at(i), p2=at(i+1), p3=at(i+2);
+    const cp1x = p1[0] + (p2[0]-p0[0])/6, cp1y = p1[1] + (p2[1]-p0[1])/6;
+    const cp2x = p2[0] - (p3[0]-p1[0])/6, cp2y = p2[1] - (p3[1]-p1[1])/6;
+    out.push(`C ${cp1x.toFixed(2)} ${cp1y.toFixed(2)} ${cp2x.toFixed(2)} ${cp2y.toFixed(2)} ${p2[0].toFixed(2)} ${p2[1].toFixed(2)}`);
+  }
+  out.push('Z'); return out.join(' ');
+}
+
+// ----------------------- State save/restore -----------------------
+const LS_KEY = 'voronoi_relaxer_state_v13';
+function saveState(){
+  const state = {
+    cells:+ui('cells').value, lloyd:+ui('lloyd').value, relax:+ui('relax').value,
+    alpha:+ui('alpha').value, subdiv:+ui('subdiv').value, jitter:+ui('jitter').value,
+    animate:ui('animateToggle').checked, animMs:+ui('animMs').value,
+    phases: phasesCur
+  };
+  try{ localStorage.setItem(LS_KEY, JSON.stringify(state)); }catch(e){}
+}
+function loadState(){
+  try{
+    const raw = localStorage.getItem(LS_KEY); if(!raw) return false;
+    const s = JSON.parse(raw);
+    ui('cells').value=s.cells??ui('cells').value; ui('cellsOut').textContent=ui('cells').value;
+    ui('lloyd').value=s.lloyd??ui('lloyd').value; ui('lloydOut').textContent=ui('lloyd').value;
+    ui('relax').value=s.relax??ui('relax').value; ui('relaxOut').textContent=ui('relax').value;
+    ui('alpha').value=s.alpha??ui('alpha').value; ui('alphaOut').textContent=(+ui('alpha').value).toFixed(2);
+    ui('subdiv').value=s.subdiv??ui('subdiv').value; ui('subdivOut').textContent=ui('subdiv').value;
+    ui('jitter').value=s.jitter??ui('jitter').value; ui('jitterOut').textContent=ui('jitter').value;
+    ui('animateToggle').checked = (s.animate!==undefined)? s.animate : ui('animateToggle').checked;
+    ui('animMs').value = s.animMs??ui('animMs').value; ui('animMsOut').textContent=ui('animMs').value;
+    if(Array.isArray(s.phases) && s.phases.length===phasesCur.length){
+      phasesFrom = clonePhases(s.phases); phasesTo = clonePhases(s.phases); phasesCur = clonePhases(s.phases);
+    }
+    return true;
+  }catch(e){ return false; }
+}
+
+// Save when phase sliders change (after UI build)
+function wirePhaseSaves(){
+  phasesCur.forEach((ph,idx)=>{
+    ['Color','W','A','Ang'].forEach(suf=>{
+      const el = ui(`p${idx}${suf}`); if(el){ el.addEventListener('change', saveState); el.addEventListener('input', saveState); }
+    });
+  });
+}
+
+// ----------------------- Init -----------------------
+buildPhasesUI();
+if(!loadState()) { /* first run keeps defaults */ }
+wirePhaseSaves();
+regenerate();
+saveState();
+
+</script>
+</body>
+</html>

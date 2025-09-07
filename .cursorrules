@@ -1,0 +1,84 @@
+## Cursor Rules: Rock Mineral Grain Simulator
+
+### Purpose
+Keep changes fast and low-risk while preserving a gap-free Voronoi tiling and current UX. Use these rules as constraints and context for the assistant.
+
+### Tech Context
+- Stack: Vite + ES modules (no TS), d3-delaunay, SVG rendering, Vitest, ESLint (flat config).
+- Entry points: `src/main.js`, `src/sim/VoronoiSimulator.js`.
+- Frame is fixed at 600×600 px. Default seed count: 120.
+
+### Quick Checklist for Any Change
+- Run: `npm run lint` and `npm test`. Avoid adding slow tests.
+- Keep a gap-free tiling: if visuals change cell shapes, recompute Voronoi from moved sites; never warp polygons directly.
+- Preserve public contracts and file boundaries listed below.
+- If you change geometry, add/update a small Vitest case (fast, deterministic if possible).
+- If you change UX text or controls, ensure the dev server renders correctly and labels remain readable.
+
+### Invariants and Constraints
+- No voids/overlaps in the texture at any time.
+- Neighbor order must be CCW starting at the top-most neighbor.
+- Maintain `VoronoiCell` attributes: `id`, `polygon`, `centroid`, `mineralType`, `baselineRadius`, `aspectRatio`, `orientationDeg`, `neighborIdsCCWFromTop`.
+- Legend stays on the right; content row centered horizontally.
+- Do not introduce responsiveness unless explicitly requested.
+
+### Approved Extension Points
+- `VoronoiSimulator.getEffectivePoints()` for anisotropy/size logic.
+- `VoronoiSimulator.renderFromPoints(points)` for re-computation and rendering.
+- New UI controls in `mountLegend` within `src/main.js` (keep labels short and readable).
+- New minerals via `MineralTypeRegistry.createDefault()`.
+
+### Do Not
+- Do not mutate SVG polygon coordinates to simulate aspect/size; move sites instead.
+- Do not change `id` assignment semantics for cells during a single generation.
+- Do not add heavy dependencies or slow ESLint plugins.
+- Do not raise default seed count above 120 without explicit performance review.
+
+### Implementation Guidance
+- Geometry/animation:
+  - Use `requestAnimationFrame` and recompute Voronoi once per frame.
+  - Keep animation duration modest (200–400 ms) and avoid timers.
+  - Clamp sites to the frame after transforms.
+- Rendering:
+  - Keep `.cell`, `.cell-label`, and `.hide-labels` class semantics intact.
+  - Neighbor-count toggle must keep working after re-renders.
+- Code style:
+  - ES2022 modules only; clear, long-form names; no abbreviated identifiers.
+  - Avoid deep nesting; prefer early returns.
+
+### Testing
+- Keep tests small and fast (pure math/model where possible).
+- For geometry changes, test attribute presence and simple invariants (e.g., polygons exist, neighbors unique and non-empty).
+- Avoid DOM-heavy tests; SVG structure verification is optional and should be minimal.
+
+### Linting
+- Use the existing ESLint flat config; do not add slow plugins.
+- Fix introduced linter errors before concluding a change.
+
+### Performance Notes
+- Do not recompute Voronoi more than once per animation frame.
+- Debounce/throttle new UI inputs to animation cadence (~16 ms) if needed.
+- Prefer calculations on arrays of numbers; avoid object churn in inner loops.
+
+### File Boundaries / APIs to Preserve
+- `src/sim/VoronoiSimulator.js`
+  - Keep: `_computeFromPoints(points)`, `renderFromPoints(points)`, `getEffectivePoints()`, `renderSVG()` public behaviors.
+- `src/main.js`
+  - Keep: legend building, checkbox toggle, slider wiring, animation loop structure.
+- `src/sim/model/VoronoiCell.js`
+  - Pure data model; no rendering concerns.
+- `src/sim/minerals/*`
+  - `MineralType` holds `aspectRatioScale` and `sizeScale` (UI owned).
+
+### PR / Commit Guidance
+- After every functional change, update `requirements.md` to reflect the change.
+- If geometry or controls change:
+  - Update `requirements.md` if constraints/UX change.
+  - Add/adjust 1–2 quick Vitest checks.
+- Always run `npm run lint && npm test` before pushing.
+
+### Out of Scope (unless requested)
+- Responsive layout, server-side components, or persistence.
+- Switching to Canvas/WebGL, TypeScript, or state libraries.
+
+

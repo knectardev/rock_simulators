@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Voronoi → Natural-Grain Relaxer</title>
+  <style>
+    :root {
+      color-scheme: dark;
+    }
+    body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif; background:#0b1020; color:#e6e6ea; }
+    .wrap { display:grid; grid-template-columns: 320px 1fr; min-height: 100vh; }
+    .panel { padding: 16px; border-right: 1px solid #1b2240; background:#0f152c; }
+    .panel h1 { font-size: 18px; margin: 0 0 12px; }
+    .panel .group { margin-bottom: 16px; }
+    .panel label { display:flex; justify-content:space-between; font-size:13px; gap:12px; margin:6px 0; }
+    .panel input[type="range"] { width: 180px; }
+    .panel button { background:#1d2a5b; color:#fff; border:0; padding:8px 10px; border-radius:10px; cursor:pointer; }
+    .panel button:active { transform: translateY(1px); }
+    canvas { display:block; width:100%; height:100%; background:#0b1020; }
+    .small { font-size: 12px; color:#9aa3c7; }
+  </style>
+  <!-- d3-delaunay provides a robust Voronoi/Delaunay implementation -->
+  <script src="https://unpkg.com/d3-delaunay@6.0.2/dist/d3-delaunay.min.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <div class="panel">
+    <h1>Voronoi → Natural-Grain Relaxer</h1>
+    <div class="group">
+      <label>Cells <span><output id="cellsOut">450</output></span></label>
+      <input id="cells" type="range" min="50" max="1200" value="450" step="10" />
+    </div>
+    <div class="group">
+      <label>Lloyd (centroid) iters <span><output id="lloydOut">2</output></span></label>
+      <input id="lloyd" type="range" min="0" max="10" value="2" />
+      <div class="small">Smooths cell size/shape while preserving topology.</div>
+    </div>
+    <div class="group">
+      <label>Boundary relax iters <span><output id="relaxOut">10</output></span></label>
+      <input id="relax" type="range" min="0" max="60" value="10" />
+      <div class="small">Curvature-driven (Laplacian) smoothing on polygon points.</div>
+    </div>
+    <div class="group">
+      <label>Relax step (α) <span><output id="alphaOut">0.18</output></span></label>
+      <input id="alpha" type="range" min="0" max="0.5" value="0.18" step="0.01" />
+    </div>
+    <div class="group">
+      <label>Subdivide edges <span><output id="subdivOut">4</output></span></label>
+      <input id="subdiv" type="range" min="0" max="10" value="4" />
+      <div class="small">Adds intermediate points so curves can bend naturally.</div>
+    </div>
+    <div class="group">
+      <label>Seed jitter <span><output id="jitterOut">0.0</output></span></label>
+      <input id="jitter" type="range" min="0" max="10" value="0" step="0.5" />
+      <div class="small">Randomizes sites slightly to avoid hex-like regularity.</div>
+    </div>
+    <div class="group">
+      <label>Palette</label>
+      <select id="palette">
+        <option value="rock">Rock (3 phases)</option>
+        <option value="grayscale">Grayscale</option>
+        <option value="earth">Earthy</option>
+        <option value="random">Random</option>
+      </select>
+    </div>
+    <div class="group">
+      <button id="regen">Regenerate</button>
+      <button id="exportSvg">Export SVG</button>
+    </div>
+    <p class="small">Algorithm: Voronoi → (optional) Lloyd relaxation → edge subdivision → curvature flow (Laplacian) smoothing → Catmull‑Rom curve rendering. This mimics surface‑energy‑driven boundary migration so grains lose straight edges and become lensy/curvy.</p>
+  </div>
+  <canvas id="cnv"></canvas>
+</div>
+<script>
+const canvas = document.getElementById('cnv');
+const ctx = canvas.getContext('2d');
+let W, H; function resize(){ W = canvas.width = canvas.clientWidth; H = canvas.height = canvas.clientHeight; } window.addEventListener('resize', ()=>{ resize(); draw(); }); resize();
+
+const ui = id => document.getElementById(id);
+['cells','lloyd','relax','alpha','subdiv','jitter'].forEach(id=>{
+  ui(id).addEventListener('input', ()=>{
+    ui(id+'Out').textContent = ui(id).value;
+  });
+});
+ui('alphaOut').textContent = (+ui('alpha').value).toFixed(2);
+
+ui('regen').addEventListener('click', regenerate);
+ui('exportSvg').addEventListener('click', exportSVG);
+
+let polygons = [];
+let colors = [];
+
+function regenerate(){
+  const n = +ui('cells').value;
+  const jitter = +ui('jitter').value;
+  let sites = Array.from({length:n}, ()=>[Math.random()*W, Math.random()*H]);
+  if(jitter>0){
+    sites = sites.map(([x,y])=>[x + (Math.random()-0.5)*jitter, y + (Math.random()-0.5)*jitter]);
+  }
+
+  const lloydIters = +ui('lloyd').value;
+  let delaunay = d3.Delaunay.from(sites);
+  let voronoi = delaunay.voronoi([0,0,W,H]);
+
+  for(let k=0;k<lloydIters;k++){
+    // Move each site to its cell centroid (Lloyd relaxation)
+    sites = sites.map((s,i)=> centroid(voronoi.cellPolygon(i)));
+    delaunay = d3.Delaunay.from(sites);
+    voronoi = delaunay.voronoi([0,0,W,H]);
+  }
+  // Grab polygons
+  polygons = [];
+  for(let i=0;i<sites.length;i++){
+    const poly = voronoi.cellPolygon(i);
+    if(!poly) continue;
+    let pts = poly.slice(0, -1); // last = first, drop duplicate
+    // optional edge subdivision before smoothing
+    const subdivN = +ui('subdiv').value;
+    if(subdivN>0) pts = subdivide(pts, subdivN);
+    // curvature-driven smoothing (discrete Laplacian)
+    const relaxIters = +ui('relax').value; const alpha = +ui('alpha').value;
+    for(let r=0;r<relaxIters;r++) pts = laplacianSmooth(pts, alpha);
+    polygons.push(pts);
+  }
+  colors = makePalette(ui('palette').value, polygons.length);
+  draw();
+}
+
+function centroid(pts){
+  // polygon centroid (area-weighted)
+  let x=0,y=0,a=0;
+  for(let i=0;i<pts.length-1;i++){
+    const [x0,y0] = pts[i];
+    const [x1,y1] = pts[i+1];
+    const cross = x0*y1 - x1*y0; a += cross; x += (x0+x1)*cross; y += (y0+y1)*cross;
+  }
+  a *= 0.5; if (Math.abs(a)<1e-9) return pts[0];
+  return [x/(6*a), y/(6*a)];
+}
+
+function subdivide(pts, n){
+  // subdivide each edge into n segments
+  const out = [];
+  for(let i=0;i<pts.length;i++){
+    const a = pts[i];
+    const b = pts[(i+1)%pts.length];
+    for(let k=0;k<n;k++){
+      const t = k/n; out.push([a[0]*(1-t)+b[0]*t, a[1]*(1-t)+b[1]*t]);
+    }
+  }
+  return out;
+}
+
+function laplacianSmooth(pts, alpha){
+  const N = pts.length; const out = new Array(N);
+  for(let i=0;i<N;i++){
+    const p = pts[i]; const pPrev = pts[(i-1+N)%N]; const pNext = pts[(i+1)%N];
+    const mx = (pPrev[0] + pNext[0]) * 0.5; const my = (pPrev[1] + pNext[1]) * 0.5;
+    out[i] = [p[0] + alpha*(mx - p[0]), p[1] + alpha*(my - p[1])];
+  }
+  return out;
+}
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.lineWidth = 0.6; ctx.strokeStyle = 'rgba(15,20,35,0.9)';
+  for(let i=0;i<polygons.length;i++){
+    drawSmoothPolygon(polygons[i], colors[i]);
+  }
+}
+
+function drawSmoothPolygon(pts, fill){
+  if(!pts || pts.length<3) return;
+  ctx.beginPath();
+  // Catmull-Rom to Bezier conversion for a smooth closed curve
+  const closed = pts.slice();
+  // ensure it's closed by adding points at ends
+  const N = closed.length;
+  function at(idx){ return closed[(idx+N)%N]; }
+  for(let i=0;i<N;i++){
+    const p0 = at(i-1), p1 = at(i), p2 = at(i+1), p3 = at(i+2);
+    const cp1x = p1[0] + (p2[0]-p0[0])/6;
+    const cp1y = p1[1] + (p2[1]-p0[1])/6;
+    const cp2x = p2[0] - (p3[0]-p1[0])/6;
+    const cp2y = p2[1] - (p3[1]-p1[1])/6;
+    if(i===0) ctx.moveTo(p1[0], p1[1]);
+    ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2[0], p2[1]);
+  }
+  ctx.closePath();
+  ctx.fillStyle = fill; ctx.fill(); ctx.stroke();
+}
+
+function makePalette(kind, n){
+  function hsl(h,s,l){ return `hsl(${h} ${s}% ${l}%)`; }
+  if(kind==='grayscale') return Array.from({length:n}, (_,i)=>hsl(0,0, 25+50*Math.random()));
+  if(kind==='earth'){
+    const base = [25, 35, 45];
+    return Array.from({length:n}, ()=> hsl(base[(Math.random()*base.length)|0], 40+20*Math.random(), 35+20*Math.random()));
+  }
+  if(kind==='random') return Array.from({length:n}, ()=>hsl((Math.random()*360)|0, 50+30*Math.random(), 40+20*Math.random()));
+  // rock-like 3 phases
+  const trio = ['#5e8bd6','#69c39a','#e2a33a'];
+  return Array.from({length:n}, (_,i)=> trio[i%3]);
+}
+
+function exportSVG(){
+  const svgParts = [
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" fill="none" stroke="rgba(15,20,35,0.9)" stroke-width="0.6">`
+  ];
+  for(let i=0;i<polygons.length;i++){
+    const d = pathDataFromPolygon(polygons[i]);
+    svgParts.push(`<path d="${d}" fill="${colors[i]}"/>`);
+  }
+  svgParts.push('</svg>');
+  const blob = new Blob([svgParts.join('\n')], {type:'image/svg+xml'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'relaxed_voronoi.svg'; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function pathDataFromPolygon(pts){
+  // Recreate the same Catmull-Rom -> Bezier curve as in canvas
+  const N = pts.length; const out = [];
+  function at(idx){ return pts[(idx+N)%N]; }
+  const m = at(0); out.push(`M ${m[0].toFixed(2)} ${m[1].toFixed(2)}`);
+  for(let i=0;i<N;i++){
+    const p0 = at(i-1), p1 = at(i), p2 = at(i+1), p3 = at(i+2);
+    const cp1x = p1[0] + (p2[0]-p0[0])/6;
+    const cp1y = p1[1] + (p2[1]-p0[1])/6;
+    const cp2x = p2[0] - (p3[0]-p1[0])/6;
+    const cp2y = p2[1] - (p3[1]-p1[1])/6;
+    out.push(`C ${cp1x.toFixed(2)} ${cp1y.toFixed(2)} ${cp2x.toFixed(2)} ${cp2y.toFixed(2)} ${p2[0].toFixed(2)} ${p2[1].toFixed(2)}`);
+  }
+  out.push('Z');
+  return out.join(' ');
+}
+
+// initial run
+regenerate();
+</script>
+</body>
+</html>
