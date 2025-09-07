@@ -6,40 +6,49 @@
     <title>Rock Mineral Grain Simulator</title>
     <link rel="stylesheet" href="/src/styles.css" />
     <style>
-      .demo-tiles { max-width: 960px; margin: 16px auto; }
+      body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color: #222; background: #f7f8fb; }
+      .page-header { padding: 32px 16px 10px 16px; background: linear-gradient(180deg, #ffffff 0%, #f6f8fc 100%); border-bottom: 1px solid #e6eaf2; }
+      .page-header .header-inner { max-width: 960px; margin: 0 auto; text-align: center; }
+      .page-header h1 { margin: 0 0 6px 0; font-size: 28px; letter-spacing: 0.2px; }
+      .page-header h2 { margin: 0 0 10px 0; font-size: 18px; font-weight: 500; color: #505a6b; }
+      .page-header .summary { margin: 0 auto; max-width: 760px; font-size: 14px; line-height: 1.6; color: #60697b; }
+
+      .demo-tiles { max-width: 960px; margin: 24px auto; padding: 0 16px; }
       .tiles-row { display: block; text-align: center; }
-      .tile { display: inline-block; width: 220px; margin: 8px; padding: 12px; border: 1px solid #ddd; border-radius: 8px; text-decoration: none; color: inherit; background: #fff; }
-      .tile svg { width: 96px; height: 96px; display: block; margin: 0 auto 8px auto; border-radius: 4px; }
-      .tile h3 { margin: 6px 0 4px 0; font-size: 16px; }
-      .tile p { margin: 0; font-size: 13px; line-height: 1.3; color: #444; }
+      .tile { display: inline-block; width: 240px; margin: 12px; padding: 14px; border: 1px solid #e2e7f0; border-radius: 12px; text-decoration: none; color: inherit; background: #fff; box-shadow: 0 1px 2px rgba(20, 24, 40, 0.04); transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease; }
+      .tile svg { width: 96px; height: 96px; display: block; margin: 0 auto 8px auto; border-radius: 6px; }
+      .tile img { width: 96px; height: 96px; display: block; margin: 0 auto 8px auto; border-radius: 6px; object-fit: cover; background: #f4f6fa; }
+      .tile h3 { margin: 6px 0 6px 0; font-size: 17px; }
+      .tile p { margin: 0; font-size: 13px; line-height: 1.4; color: #4a5568; }
+      .tile:hover, .tile:focus-visible { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(20, 24, 40, 0.12); border-color: #cfd7e6; outline: none; }
     </style>
   </head>
   <body>
+    <header class="page-header" aria-label="Page header">
+      <div class="header-inner">
+        <h1>Rock Simulators</h1>
+        <h2>Interactive demos of geological patterns and deformation</h2>
+        <p class="summary">A small collection of canvas-based visualizations exploring layer shear, Voronoi tiling, and edge-driven fold compression. Adjust parameters, play animations, and observe how textures and structures evolve.</p>
+      </div>
+    </header>
     <section class="demo-tiles" aria-label="Rock simulator demos">
       <div class="tiles-row">
-        <a class="tile" href="/layer_shear.html" aria-label="Layer Shear demo">
-          <svg viewBox="0 0 64 64" role="img" aria-hidden="true">
-            <rect x="0" y="0" width="64" height="64" fill="#f4f4f4" />
-            <rect x="0" y="8" width="64" height="12" fill="#c9d6df" />
-            <rect x="6" y="26" width="58" height="12" fill="#9aa9b2" />
-            <rect x="12" y="44" width="52" height="12" fill="#6c7a89" />
-          </svg>
+        <a class="tile" href="layer_shear.html" aria-label="Layer Shear demo">
+          <img src="tiles/layer_shear.png" alt="Layer shear thumbnail" />
           <h3>Layer Shear</h3>
           <p>Shear layered strata and observe deformation patterns.</p>
         </a>
 
-        <a class="tile" href="/voronoi2.html" aria-label="Voronoi 2 demo">
-          <svg viewBox="0 0 64 64" role="img" aria-hidden="true">
-            <rect x="0" y="0" width="64" height="64" fill="#f4f4f4" />
-            <circle cx="18" cy="18" r="6" fill="#e6b8a2" />
-            <circle cx="46" cy="16" r="6" fill="#c3d9b1" />
-            <circle cx="22" cy="42" r="6" fill="#a7c5eb" />
-            <circle cx="48" cy="44" r="6" fill="#eac4d5" />
-            <path d="M2 32 L62 32" stroke="#bbbbbb" stroke-width="1" />
-            <path d="M32 2 L32 62" stroke="#bbbbbb" stroke-width="1" />
-          </svg>
+        <a class="tile" href="voronoi2.html" aria-label="Voronoi 2 demo">
+          <img src="tiles/voronoi2.png" alt="Voronoi 2 thumbnail" />
           <h3>Voronoi 2</h3>
           <p>Animated seed perturbations with recomputed tiling.</p>
+        </a>
+        
+        <a class="tile" href="fold_compression.html" aria-label="Fold Compression demo">
+          <img src="tiles/fold_compression.png" alt="Fold compression thumbnail" />
+          <h3>Fold Compression</h3>
+          <p>Edge-driven layered compression with ping-pong and holds.</p>
         </a>
        
       </div>
