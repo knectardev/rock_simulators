@@ -1,0 +1,958 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2D Finite Element Blob Simulation</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #1a1a1a;
+            color: white;
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+        }
+        
+        #container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+        
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 100;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px;
+            border-radius: 10px;
+            max-width: 300px;
+        }
+        
+        .control-group {
+            margin-bottom: 15px;
+        }
+        
+        .control-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 12px;
+        }
+        
+        .control-group input[type="range"] {
+            width: 100%;
+            margin-bottom: 3px;
+        }
+        
+        .control-group span {
+            font-size: 10px;
+            color: #ccc;
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        button {
+            padding: 8px 15px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        
+        button:hover {
+            background: #45a049;
+        }
+        
+        button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+        
+        #info {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            font-size: 11px;
+            color: #888;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="controls">
+            <h3>Simulation Controls</h3>
+            
+            <div class="control-group">
+                <label>Global Gravity: <span id="gravityValue">9.8</span></label>
+                <input type="range" id="gravity" min="0" max="20" step="0.1" value="9.8">
+            </div>
+            
+            <div class="control-group">
+                <label>Blob Mass: <span id="massValue">1.0</span></label>
+                <input type="range" id="mass" min="0.1" max="5.0" step="0.1" value="1.0">
+            </div>
+            
+            
+            
+            <div class="control-group">
+                <label>Viscosity: <span id="viscosityValue">0.5</span></label>
+                <input type="range" id="viscosity" min="0" max="2" step="0.1" value="0.5">
+            </div>
+            
+            <div class="control-group">
+                <label>Elasticity: <span id="elasticityValue">0.8</span></label>
+                <input type="range" id="elasticity" min="0" max="3.0" step="0.05" value="0.8">
+            </div>
+            
+            <div class="control-group">
+                <label>Blob Friction: <span id="blobFrictionValue">0.3</span></label>
+                <input type="range" id="blobFriction" min="0" max="1" step="0.05" value="0.3">
+            </div>
+            
+            <div class="control-group">
+                <label>Ground Friction: <span id="groundFrictionValue">0.5</span></label>
+                <input type="range" id="groundFriction" min="0" max="1" step="0.05" value="0.5">
+            </div>
+            
+            <div class="control-group">
+                <label>Node Density: <span id="nodeDensityValue">8</span></label>
+                <input type="range" id="nodeDensity" min="4" max="16" step="1" value="8">
+            </div>
+            
+            <div class="control-group">
+                <label>Animation Speed: <span id="animSpeedValue">1.0</span></label>
+                <input type="range" id="animSpeed" min="0.1" max="3.0" step="0.1" value="1.0">
+            </div>
+            
+            <div class="button-group">
+                <button id="startBtn">Start</button>
+                <button id="pauseBtn" disabled>Pause</button>
+                <button id="resetBtn">Reset</button>
+                <button id="reverseBtn" disabled>Reverse</button>
+            </div>
+        </div>
+        
+        <div id="info">
+            WebGL 2D Finite Element Blob Simulation | FPS: <span id="fps">60</span>
+        </div>
+    </div>
+
+    <script>
+        class BlobSimulation {
+            constructor() {
+                this.engine = null;
+                this.world = null;
+                this.render = null;
+                this.runner = null;
+                this.blob = null;
+                this.constraints = [];
+                this.walls = null;
+                this.isRunning = false;
+                this.isPaused = false;
+                this.animationSpeed = 1.0;
+                this.lastTime = 0;
+                this.fps = 0;
+                this.frameCount = 0;
+                this.lastFPSTime = 0;
+                
+                // Drag controls state
+                this.isDragging = false;
+                this.dragStartMouse = null; // THREE.Vector3
+                this.dragStartNodePositions = [];
+                
+                // Pinch gesture state
+                this.isPinching = false;
+                this.pinchStartTouches = null; // [{x,y}, {x,y}]
+                this.pinchStartCenter = null;  // {x,y}
+                this.pinchStartVector = null;  // {x,y}
+                this.pinchStartDistance = 0;
+                this.pinchStartNodePositions = [];
+                
+                // Simulation parameters
+                this.params = {
+                    gravity: 9.8,
+                    mass: 1.0,
+                    viscosity: 0.5,
+                    elasticity: 0.8,
+                    blobFriction: 0.3,
+                    groundFriction: 0.5,
+                    nodeDensity: 8
+                };
+                
+                this.boxWidth = 1000;
+                this.boxHeight = 600;
+                this.blobRadius = 100;
+                
+                this.initThreeJS();
+                this.initMatter();
+                this.initControls();
+                this.initMouseControls();
+                this.createBox();
+                this.createBlob();
+                this.animate();
+            }
+            
+            initThreeJS() {
+                this.scene = new THREE.Scene();
+                this.camera = new THREE.OrthographicCamera(
+                    -this.boxWidth/2, this.boxWidth/2,
+                    this.boxHeight/2, -this.boxHeight/2,
+                    1, 1000
+                );
+                this.camera.position.z = 100;
+                
+                this.renderer = new THREE.WebGLRenderer({ antialias: true });
+                // Fix the render surface to the simulation box size to avoid aspect stretching
+                this.renderer.setSize(this.boxWidth, this.boxHeight);
+                this.renderer.setClearColor(0x222222);
+                document.getElementById('container').appendChild(this.renderer.domElement);
+                // Center the canvas within the container while keeping a fixed size
+                this.renderer.domElement.style.position = 'absolute';
+                this.renderer.domElement.style.left = '50%';
+                this.renderer.domElement.style.top = '50%';
+                this.renderer.domElement.style.transform = 'translate(-50%, -50%)';
+                
+                // Lighting
+                const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
+                this.scene.add(ambientLight);
+                
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                directionalLight.position.set(0, 0, 200);
+                this.scene.add(directionalLight);
+            }
+            
+            initMatter() {
+                this.engine = Matter.Engine.create();
+                this.world = this.engine.world;
+                // Use gentle gravity scaling to avoid tunneling through floor
+                this.engine.world.gravity.y = -this.params.gravity / 100;
+                this.engine.world.gravity.scale = 0.001;
+                // Improve collision resolution
+                this.engine.positionIterations = 8;   // default 6
+                this.engine.velocityIterations = 8;   // default 4
+                this.engine.constraintIterations = 4; // default 2
+                // Keep bodies awake so collisions are lively
+                this.engine.enableSleeping = false;
+            }
+            
+            createBox() {
+                // Create box walls as Three.js objects
+                const wallMaterial = new THREE.LineBasicMaterial({ 
+                    color: 0x00ff00, 
+                    linewidth: 2 
+                });
+                
+                // Box outline
+                const boxGeometry = new THREE.BufferGeometry();
+                const vertices = new Float32Array([
+                    -this.boxWidth/2, -this.boxHeight/2, 0,
+                    this.boxWidth/2, -this.boxHeight/2, 0,
+                    this.boxWidth/2, this.boxHeight/2, 0,
+                    -this.boxWidth/2, this.boxHeight/2, 0,
+                    -this.boxWidth/2, -this.boxHeight/2, 0
+                ]);
+                boxGeometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+                this.boxLine = new THREE.Line(boxGeometry, wallMaterial);
+                this.scene.add(this.boxLine);
+                
+                // Matter.js walls (invisible collision bodies)
+                const wallOptions = { 
+                    isStatic: true, 
+                    friction: this.params.groundFriction,
+                    frictionStatic: Math.min(1, this.params.groundFriction + 0.2),
+                    restitution: 0.2
+                };
+                
+                const ground = Matter.Bodies.rectangle(0, this.boxHeight/2 - 10, this.boxWidth, 20, wallOptions);
+                const leftWall = Matter.Bodies.rectangle(-this.boxWidth/2 + 10, 0, 20, this.boxHeight, wallOptions);
+                const rightWall = Matter.Bodies.rectangle(this.boxWidth/2 - 10, 0, 20, this.boxHeight, wallOptions);
+                const ceiling = Matter.Bodies.rectangle(0, -this.boxHeight/2 + 10, this.boxWidth, 20, wallOptions);
+                
+                Matter.World.add(this.world, [ground, leftWall, rightWall, ceiling]);
+                this.walls = { ground, leftWall, rightWall, ceiling };
+                // Ensure environment reflects current material behavior
+                this.updateEnvironmentCoefficients();
+            }
+            
+            createBlob() {
+                this.clearBlob();
+                
+                const nodes = [];
+                const nodeBodies = [];
+                const nodeVisuals = [];
+                const coeffs = this.getMaterialCoefficients();
+                
+                // Create grid of nodes
+                const spacing = this.blobRadius * 2 / this.params.nodeDensity;
+                const startX = -this.blobRadius;
+                const startY = this.boxHeight/2 - 150 - this.blobRadius;
+                
+                // Randomize initial outline using simple angular noise (multi-lobe sine mix)
+                const outlineNoiseAmplitude = 0.12; // smaller for smoother overall edge
+                const lobes = 2 + Math.floor(Math.random() * 4); // 2..5 low-frequency lobes
+                const phase1 = Math.random() * Math.PI * 2;
+                const phase2 = Math.random() * Math.PI * 2;
+                const outlineRadius = (theta) => {
+                    // Blend a couple sine harmonics for soft, organic shapes
+                    const n1 = Math.sin(lobes * theta + phase1);
+                    const n2 = Math.sin(lobes * 2 * theta + phase2);
+                    const n = 0.6 * n1 + 0.4 * n2; // range roughly [-1,1]
+                    return this.blobRadius * (1 + outlineNoiseAmplitude * n);
+                };
+                // Add small positional jitter to avoid a perfect lattice
+                const jitterAmplitude = Math.min(4, spacing * 0.12);
+                
+                // Node material
+                const nodeMaterial = new THREE.MeshBasicMaterial({ color: 0xff4444 });
+                const nodeGeometry = new THREE.SphereGeometry(3, 8, 8);
+                
+                for (let i = 0; i < this.params.nodeDensity; i++) {
+                    for (let j = 0; j < this.params.nodeDensity; j++) {
+                        const x = startX + i * spacing;
+                        const y = startY + j * spacing;
+                        
+                        // Only create nodes within a randomized outline
+                        const centerY = startY + this.blobRadius;
+                        const dx = x; // center X is 0
+                        const dy = y - centerY;
+                        const theta = Math.atan2(dy, dx);
+                        const radialLimit = outlineRadius(theta);
+                        const distFromCenter = Math.sqrt(dx*dx + dy*dy);
+                        if (distFromCenter <= radialLimit) {
+                            const jx = (Math.random() * 2 - 1) * jitterAmplitude;
+                            const jy = (Math.random() * 2 - 1) * jitterAmplitude;
+                            const body = Matter.Bodies.circle(x + jx, y + jy, 4, {
+                                friction: Math.min(1, this.params.blobFriction + coeffs.nodeFrictionExtra),
+                                frictionStatic: Math.min(1, this.params.blobFriction + coeffs.nodeFrictionExtra * 1.5),
+                                restitution: coeffs.restitution,
+                                frictionAir: coeffs.frictionAir
+                            });
+                            
+                            nodes.push(body);
+                            nodeBodies.push(body);
+                            
+                            // Visual representation
+                            const nodeMesh = new THREE.Mesh(nodeGeometry, nodeMaterial);
+                            nodeMesh.position.set(x + jx, y + jy, 0);
+                            this.scene.add(nodeMesh);
+                            nodeVisuals.push(nodeMesh);
+                        }
+                    }
+                }
+                
+                // Create constraints between nearby nodes
+                const constraintMaterial = new THREE.LineBasicMaterial({ 
+                    color: 0x444488, 
+                    transparent: true, 
+                    opacity: 0.6 
+                });
+                
+                this.constraints = [];
+                this.constraintVisuals = [];
+                
+                for (let i = 0; i < nodes.length; i++) {
+                    for (let j = i + 1; j < nodes.length; j++) {
+                        const dist = Math.sqrt(
+                            Math.pow(nodes[i].position.x - nodes[j].position.x, 2) +
+                            Math.pow(nodes[i].position.y - nodes[j].position.y, 2)
+                        );
+                        
+                        if (dist < spacing * 1.8) {
+                            const constraint = Matter.Constraint.create({
+                                bodyA: nodes[i],
+                                bodyB: nodes[j],
+                                length: dist,
+                                stiffness: coeffs.stiffness,
+                                damping: coeffs.damping
+                            });
+                            
+                            this.constraints.push(constraint);
+                            
+                            // Visual constraint
+                            const constraintGeometry = new THREE.BufferGeometry();
+                            const positions = new Float32Array(6);
+                            constraintGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                            const constraintLine = new THREE.Line(constraintGeometry, constraintMaterial);
+                            this.scene.add(constraintLine);
+                            this.constraintVisuals.push(constraintLine);
+                        }
+                    }
+                }
+                
+                // Add all bodies and constraints to world
+                Matter.World.add(this.world, [...nodes, ...this.constraints]);
+                
+                this.blob = {
+                    nodes: nodes,
+                    nodeVisuals: nodeVisuals,
+                    constraints: this.constraints,
+                    constraintVisuals: this.constraintVisuals
+                };
+                
+                // Create blob surface outline
+                this.createBlobSurface();
+                // Ensure nodes reflect current mass parameter
+                this.updateNodeMasses();
+            }
+            
+            createBlobSurface() {
+                if (this.blobSurface) {
+                    this.scene.remove(this.blobSurface);
+                }
+                
+                const surfaceMaterial = new THREE.LineBasicMaterial({ 
+                    color: 0x00ffff, 
+                    linewidth: 3 
+                });
+                
+                const surfaceGeometry = new THREE.BufferGeometry();
+                this.blobSurface = new THREE.Line(surfaceGeometry, surfaceMaterial);
+                this.scene.add(this.blobSurface);
+            }
+            
+            updateBlobSurface() {
+                if (!this.blob || !this.blobSurface) return;
+                
+                // Simple convex hull approximation for surface
+                const points = this.blob.nodes.map(node => ({
+                    x: node.position.x,
+                    y: node.position.y
+                }));
+                
+                // Sort points by angle from center
+                const center = points.reduce((acc, p) => ({
+                    x: acc.x + p.x / points.length,
+                    y: acc.y + p.y / points.length
+                }), {x: 0, y: 0});
+                
+                points.sort((a, b) => {
+                    const angleA = Math.atan2(a.y - center.y, a.x - center.x);
+                    const angleB = Math.atan2(b.y - center.y, b.x - center.x);
+                    return angleA - angleB;
+                });
+                
+                // Create surface vertices
+                const vertices = [];
+                const outerPoints = [];
+                for (let i = 0; i < points.length; i += Math.max(1, Math.floor(points.length / 16))) {
+                    outerPoints.push(points[i]);
+                }
+                outerPoints.push(outerPoints[0]); // Close the loop
+                
+                outerPoints.forEach(point => {
+                    vertices.push(point.x, point.y, 0);
+                });
+                
+                const positions = new Float32Array(vertices);
+                this.blobSurface.geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                this.blobSurface.geometry.attributes.position.needsUpdate = true;
+            }
+            
+            clearBlob() {
+                if (this.blob) {
+                    // Remove from Matter world
+                    Matter.World.remove(this.world, [...this.blob.nodes, ...this.blob.constraints]);
+                    
+                    // Remove from Three.js scene
+                    this.blob.nodeVisuals.forEach(visual => this.scene.remove(visual));
+                    this.blob.constraintVisuals.forEach(visual => this.scene.remove(visual));
+                    
+                    if (this.blobSurface) {
+                        this.scene.remove(this.blobSurface);
+                    }
+                }
+            }
+
+            // Map the UI viscosity (0..2) into physical-like parameters
+            getMaterialCoefficients() {
+                const viscosityClamped = Math.max(0, Math.min(2, this.params.viscosity));
+                const v = viscosityClamped / 2; // 0..1
+                // We invert some effects to achieve desired behavior:
+                // Low viscosity (v≈0) -> softer, more damping from constraints but low drag
+                // High viscosity (v≈1) -> firmer, higher drag
+                const ooze = 1 - v;
+                // Elasticity affects bulk stiffness AND desired bounciness
+                const eNorm = Math.max(0, Math.min(1, this.params.elasticity / 3.0)); // 0..1 from slider max
+                const stiffnessBase = 0.12 + 0.82 * eNorm;       // 0.12..0.94 from elasticity
+                const stiffness = Math.max(0.02, Math.min(0.98, stiffnessBase - 0.20 * ooze));
+                // Less internal damping when elasticity is high (to allow bounce)
+                const damping = Math.max(0.01, 0.14 * (1 - eNorm) + 0.08 * v); 
+                // Air drag reduced as elasticity increases so bounce energy is preserved
+                const frictionAir = Math.max(0, 0.003 + 0.010 * v * (1 - 0.75 * eNorm));
+                // Extra surface friction reduced for high elasticity; higher when oozing
+                const nodeFrictionExtra = 0.35 * ooze * (1 - 0.6 * eNorm);
+                const groundFrictionExtra = 0.35 * ooze * (1 - 0.6 * eNorm);
+                // Restitution directly from elasticity, independent of viscosity
+                const restitution = Math.max(0, Math.min(1, 0.05 + 0.95 * eNorm));
+                // Plasticity fades out as elasticity rises (so bouncy shapes don't permanently spread)
+                const plasticityThreshold = 0.05 + 0.08 * ooze * (1 - eNorm); // ~5%..13%
+                const plasticityRate = 0.5 * ooze * (1 - eNorm);             // 0..0.5, 0 when e high
+                return { stiffness, damping, frictionAir, nodeFrictionExtra, groundFrictionExtra, restitution, plasticityThreshold, plasticityRate };
+            }
+
+            // Apply updated viscosity/elasticity/friction to existing bodies/constraints
+            updateMaterialCoefficients() {
+                if (!this.blob) return;
+                const coeffs = this.getMaterialCoefficients();
+                // Update node materials
+                for (const node of this.blob.nodes) {
+                    node.frictionAir = coeffs.frictionAir;
+                    node.restitution = coeffs.restitution;
+                    node.friction = Math.min(1, this.params.blobFriction + coeffs.nodeFrictionExtra);
+                    node.frictionStatic = Math.min(1, this.params.blobFriction + coeffs.nodeFrictionExtra * 1.5);
+                }
+                // Update constraints
+                for (const c of this.constraints) {
+                    c.stiffness = coeffs.stiffness;
+                    c.damping = coeffs.damping;
+                }
+                // Update environment
+                this.updateEnvironmentCoefficients();
+            }
+
+            updateEnvironmentCoefficients() {
+                if (!this.walls) return;
+                const coeffs = this.getMaterialCoefficients();
+                const applyToWall = (wall) => {
+                    wall.friction = Math.min(1, this.params.groundFriction + coeffs.groundFrictionExtra);
+                    wall.frictionStatic = Math.min(1, this.params.groundFriction + coeffs.groundFrictionExtra * 1.5);
+                    wall.restitution = Math.max(0, 0.2 + 0.6 * coeffs.restitution);
+                };
+                applyToWall(this.walls.ground);
+                applyToWall(this.walls.leftWall);
+                applyToWall(this.walls.rightWall);
+                applyToWall(this.walls.ceiling);
+            }
+            
+            initControls() {
+                // Update value displays
+                Object.keys(this.params).forEach(key => {
+                    const slider = document.getElementById(key);
+                    const display = document.getElementById(key + 'Value');
+                    if (slider && display) {
+                        slider.addEventListener('input', (e) => {
+                            this.params[key] = parseFloat(e.target.value);
+                            display.textContent = e.target.value;
+                            this.updateSimulation();
+                        });
+                    }
+                });
+                
+                // Animation speed
+                document.getElementById('animSpeed').addEventListener('input', (e) => {
+                    this.animationSpeed = parseFloat(e.target.value);
+                    document.getElementById('animSpeedValue').textContent = e.target.value;
+                });
+                
+                // Buttons
+                document.getElementById('startBtn').addEventListener('click', () => this.start());
+                document.getElementById('pauseBtn').addEventListener('click', () => this.pause());
+                document.getElementById('resetBtn').addEventListener('click', () => this.reset());
+                document.getElementById('reverseBtn').addEventListener('click', () => this.reverse());
+
+                // Keyboard: Space toggles start/pause
+                window.addEventListener('keydown', (e) => {
+                    if (e.code === 'Space' || e.key === ' ') {
+                        // Avoid when typing in form controls
+                        const tag = (document.activeElement && document.activeElement.tagName) || '';
+                        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) return;
+                        if (e.repeat) return;
+                        e.preventDefault();
+                        if (this.isRunning && !this.isPaused) {
+                            this.pause();
+                        } else {
+                            this.start();
+                        }
+                    }
+                });
+            }
+            
+            updateSimulation() {
+                if (this.engine) {
+                    this.engine.world.gravity.y = -this.params.gravity / 100;
+                }
+                
+                // Recreate blob if node density changed
+                const currentNodeDensity = parseInt(document.getElementById('nodeDensity').value);
+                if (currentNodeDensity !== this.params.nodeDensity) {
+                    this.createBlob();
+                } else {
+                    // Update materials live when density unchanged
+                    this.updateMaterialCoefficients();
+                    this.updateNodeMasses();
+                }
+            }
+
+            updateNodeMasses() {
+                if (!this.blob || !this.blob.nodes || this.blob.nodes.length === 0) return;
+                const perNodeMass = Math.max(0.0001, this.params.mass / this.blob.nodes.length);
+                for (const node of this.blob.nodes) {
+                    Matter.Body.setMass(node, perNodeMass);
+                }
+            }
+
+            // Mouse controls for dragging the blob as a whole
+            initMouseControls() {
+                const dom = this.renderer.domElement;
+                // Disable default gestures/select to ensure smooth dragging on touch devices
+                dom.style.touchAction = 'none';
+                dom.style.userSelect = 'none';
+                
+                const onMouseDown = (event) => {
+                    if (!this.blob) return;
+                    const mouseWorld = this.getMouseWorldPosition(event);
+                    const center = this.getBlobCenter();
+                    const radius = this.getBlobRadiusEstimate();
+                    const dx = mouseWorld.x - center.x;
+                    const dy = mouseWorld.y - center.y;
+                    const distSq = dx*dx + dy*dy;
+                    if (distSq <= radius * radius) {
+                        this.isDragging = true;
+                        this.dragStartMouse = mouseWorld;
+                        // Snapshot node start positions
+                        this.dragStartNodePositions = this.blob.nodes.map(n => ({ x: n.position.x, y: n.position.y }));
+                        event.preventDefault();
+                    }
+                };
+                
+                const onMouseMove = (event) => {
+                    if (!this.isDragging || !this.blob) return;
+                    const mouseWorld = this.getMouseWorldPosition(event);
+                    const dx = mouseWorld.x - this.dragStartMouse.x;
+                    const dy = mouseWorld.y - this.dragStartMouse.y;
+                    
+                    // Translate all nodes from their original positions
+                    for (let i = 0; i < this.blob.nodes.length; i++) {
+                        const node = this.blob.nodes[i];
+                        const startPos = this.dragStartNodePositions[i];
+                        const newX = startPos.x + dx;
+                        const newY = startPos.y + dy;
+                        Matter.Body.setPosition(node, { x: newX, y: newY });
+                        Matter.Body.setVelocity(node, { x: 0, y: 0 });
+                        Matter.Body.setAngularVelocity(node, 0);
+                    }
+                    
+                    // Update visuals immediately
+                    this.updateVisuals();
+                    event.preventDefault();
+                };
+                
+                const endDrag = () => {
+                    if (this.isDragging) {
+                        this.isDragging = false;
+                        this.dragStartMouse = null;
+                        this.dragStartNodePositions = [];
+                    }
+                };
+                
+                dom.addEventListener('mousedown', onMouseDown);
+                dom.addEventListener('mousemove', onMouseMove);
+                window.addEventListener('mouseup', endDrag);
+                dom.addEventListener('mouseleave', endDrag);
+
+                // Touch support (Chrome/Surface)
+                const onTouchStart = (event) => {
+                    event.preventDefault();
+                    if (event.touches && event.touches.length === 2) {
+                        this.beginPinch(event);
+                    } else if (event.touches && event.touches.length === 1) {
+                        onMouseDown(event);
+                    }
+                };
+                const onTouchMove = (event) => {
+                    event.preventDefault();
+                    if (this.isPinching && event.touches && event.touches.length === 2) {
+                        this.updatePinch(event);
+                    } else if (!this.isPinching) {
+                        onMouseMove(event);
+                    }
+                };
+                const onTouchEnd = (event) => {
+                    event.preventDefault();
+                    if (this.isPinching && (!event.touches || event.touches.length < 2)) {
+                        this.endPinch();
+                    }
+                    if (this.isDragging && (!event.touches || event.touches.length === 0)) {
+                        endDrag();
+                    }
+                };
+                dom.addEventListener('touchstart', onTouchStart, { passive: false });
+                dom.addEventListener('touchmove', onTouchMove, { passive: false });
+                window.addEventListener('touchend', onTouchEnd, { passive: false });
+                window.addEventListener('touchcancel', onTouchEnd, { passive: false });
+            }
+            
+            getMouseWorldPosition(event) {
+                const rect = this.renderer.domElement.getBoundingClientRect();
+                let clientX = event.clientX;
+                let clientY = event.clientY;
+                if (event.touches && event.touches.length > 0) {
+                    clientX = event.touches[0].clientX;
+                    clientY = event.touches[0].clientY;
+                } else if (event.changedTouches && event.changedTouches.length > 0) {
+                    clientX = event.changedTouches[0].clientX;
+                    clientY = event.changedTouches[0].clientY;
+                }
+                const xNDC = ((clientX - rect.left) / rect.width) * 2 - 1;
+                const yNDC = -((clientY - rect.top) / rect.height) * 2 + 1;
+                const raycaster = new THREE.Raycaster();
+                raycaster.setFromCamera({ x: xNDC, y: yNDC }, this.camera);
+                const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0); // z=0 plane
+                const intersection = new THREE.Vector3();
+                raycaster.ray.intersectPlane(plane, intersection);
+                return intersection;
+            }
+
+            getTwoTouchWorldPositions(event) {
+                const touches = event.touches && event.touches.length >= 2 ? event.touches : event.changedTouches;
+                if (!touches || touches.length < 2) return null;
+                const rect = this.renderer.domElement.getBoundingClientRect();
+                const toWorld = (tx, ty) => {
+                    const xNDC = ((tx - rect.left) / rect.width) * 2 - 1;
+                    const yNDC = -((ty - rect.top) / rect.height) * 2 + 1;
+                    const raycaster = new THREE.Raycaster();
+                    raycaster.setFromCamera({ x: xNDC, y: yNDC }, this.camera);
+                    const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+                    const intersection = new THREE.Vector3();
+                    raycaster.ray.intersectPlane(plane, intersection);
+                    return { x: intersection.x, y: intersection.y };
+                };
+                const p0 = toWorld(touches[0].clientX, touches[0].clientY);
+                const p1 = toWorld(touches[1].clientX, touches[1].clientY);
+                return [p0, p1];
+            }
+
+            beginPinch(event) {
+                if (!this.blob) return;
+                const pts = this.getTwoTouchWorldPositions(event);
+                if (!pts) return;
+                this.isDragging = false;
+                this.isPinching = true;
+                const [p0, p1] = pts;
+                this.pinchStartTouches = pts;
+                this.pinchStartCenter = { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 };
+                this.pinchStartVector = { x: p1.x - p0.x, y: p1.y - p0.y };
+                this.pinchStartDistance = Math.max(0.0001, Math.hypot(this.pinchStartVector.x, this.pinchStartVector.y));
+                this.pinchStartNodePositions = this.blob.nodes.map(n => ({ x: n.position.x, y: n.position.y }));
+            }
+
+            updatePinch(event) {
+                if (!this.isPinching || !this.blob) return;
+                const pts = this.getTwoTouchWorldPositions(event);
+                if (!pts) return;
+                const [c0, c1] = pts;
+                const currentCenter = { x: (c0.x + c1.x) / 2, y: (c0.y + c1.y) / 2 };
+                const currentVector = { x: c1.x - c0.x, y: c1.y - c0.y };
+                const currentDistance = Math.max(0.0001, Math.hypot(currentVector.x, currentVector.y));
+                const scale = currentDistance / this.pinchStartDistance;
+                
+                // Basis from start vector
+                const u0x = this.pinchStartVector.x / this.pinchStartDistance;
+                const u0y = this.pinchStartVector.y / this.pinchStartDistance;
+                // Current basis
+                const u1x = currentVector.x / currentDistance;
+                const u1y = currentVector.y / currentDistance;
+                // Perp vectors
+                const v0x = -u0y, v0y = u0x;
+                const v1x = -u1y, v1y = u1x;
+                
+                // Apply anisotropic scaling along the pinch axis only (perp scale = 1)
+                for (let i = 0; i < this.blob.nodes.length; i++) {
+                    const startP = this.pinchStartNodePositions[i];
+                    const rx = startP.x - this.pinchStartCenter.x;
+                    const ry = startP.y - this.pinchStartCenter.y;
+                    const compU = rx * u0x + ry * u0y; // along axis
+                    const compV = rx * v0x + ry * v0y; // perpendicular
+                    const newAlong = compU * scale;
+                    const newPerp = compV; // keep perpendicular same to avoid blowup
+                    const nx = currentCenter.x + newAlong * u1x + newPerp * v1x;
+                    const ny = currentCenter.y + newAlong * u1y + newPerp * v1y;
+                    const node = this.blob.nodes[i];
+                    Matter.Body.setPosition(node, { x: nx, y: ny });
+                    Matter.Body.setVelocity(node, { x: 0, y: 0 });
+                    Matter.Body.setAngularVelocity(node, 0);
+                }
+                this.updateVisuals();
+            }
+
+            endPinch() {
+                this.isPinching = false;
+                this.pinchStartTouches = null;
+                this.pinchStartCenter = null;
+                this.pinchStartVector = null;
+                this.pinchStartDistance = 0;
+                this.pinchStartNodePositions = [];
+            }
+            
+            getBlobCenter() {
+                if (!this.blob || this.blob.nodes.length === 0) return { x: 0, y: 0 };
+                const sum = this.blob.nodes.reduce((acc, n) => ({ x: acc.x + n.position.x, y: acc.y + n.position.y }), { x: 0, y: 0 });
+                return { x: sum.x / this.blob.nodes.length, y: sum.y / this.blob.nodes.length };
+            }
+            
+            getBlobRadiusEstimate() {
+                const center = this.getBlobCenter();
+                let maxDistSq = 0;
+                if (this.blob && this.blob.nodes.length > 0) {
+                    for (const n of this.blob.nodes) {
+                        const dx = n.position.x - center.x;
+                        const dy = n.position.y - center.y;
+                        const d2 = dx*dx + dy*dy;
+                        if (d2 > maxDistSq) maxDistSq = d2;
+                    }
+                }
+                return Math.sqrt(maxDistSq) + 10; // small padding
+            }
+            
+            updateVisuals() {
+                if (!this.blob) return;
+                // Update node meshes
+                this.blob.nodeVisuals.forEach((visual, i) => {
+                    const node = this.blob.nodes[i];
+                    visual.position.set(node.position.x, node.position.y, 0);
+                });
+                // Update constraint lines
+                this.blob.constraintVisuals.forEach((visual, i) => {
+                    const constraint = this.constraints[i];
+                    const positionAttribute = visual.geometry.attributes.position;
+                    positionAttribute.array[0] = constraint.bodyA.position.x;
+                    positionAttribute.array[1] = constraint.bodyA.position.y;
+                    positionAttribute.array[2] = 0;
+                    positionAttribute.array[3] = constraint.bodyB.position.x;
+                    positionAttribute.array[4] = constraint.bodyB.position.y;
+                    positionAttribute.array[5] = 0;
+                    positionAttribute.needsUpdate = true;
+                });
+                // Update blob surface
+                this.updateBlobSurface();
+            }
+            
+            start() {
+                this.isRunning = true;
+                this.isPaused = false;
+                document.getElementById('startBtn').disabled = true;
+                document.getElementById('pauseBtn').disabled = false;
+                document.getElementById('reverseBtn').disabled = true;
+            }
+            
+            pause() {
+                this.isPaused = true;
+                document.getElementById('startBtn').disabled = false;
+                document.getElementById('pauseBtn').disabled = true;
+                document.getElementById('reverseBtn').disabled = false;
+            }
+            
+            reset() {
+                this.isRunning = false;
+                this.isPaused = false;
+                this.createBlob();
+                document.getElementById('startBtn').disabled = false;
+                document.getElementById('pauseBtn').disabled = true;
+                document.getElementById('reverseBtn').disabled = true;
+            }
+            
+            reverse() {
+                // Simple reverse by applying upward force to all nodes
+                if (this.blob) {
+                    this.blob.nodes.forEach(node => {
+                        Matter.Body.applyForce(node, node.position, {x: 0, y: 0.01});
+                    });
+                }
+            }
+            
+            animate() {
+                requestAnimationFrame(() => this.animate());
+                
+                const currentTime = performance.now();
+                const deltaTime = currentTime - this.lastTime;
+                this.lastTime = currentTime;
+                
+                // FPS calculation
+                this.frameCount++;
+                if (currentTime - this.lastFPSTime >= 1000) {
+                    this.fps = Math.round((this.frameCount * 1000) / (currentTime - this.lastFPSTime));
+                    document.getElementById('fps').textContent = this.fps;
+                    this.frameCount = 0;
+                    this.lastFPSTime = currentTime;
+                }
+                
+                if (this.isRunning && !this.isPaused) {
+                    // Update physics
+                    const timeStep = (1/60) * this.animationSpeed;
+                    Matter.Engine.update(this.engine, timeStep * 1000);
+                    
+                    // Update visuals
+                    if (this.blob) {
+                        // Plastic deformation for oozing
+                        const coeffs = this.getMaterialCoefficients();
+                        if (coeffs.plasticityRate > 0) {
+                            const threshold = coeffs.plasticityThreshold;
+                            const rate = coeffs.plasticityRate;
+                            for (let i = 0; i < this.constraints.length; i++) {
+                                const c = this.constraints[i];
+                                if (!c.bodyA || !c.bodyB || !c.length) continue;
+                                const dx = c.bodyB.position.x - c.bodyA.position.x;
+                                const dy = c.bodyB.position.y - c.bodyA.position.y;
+                                const dist = Math.sqrt(dx*dx + dy*dy) || c.length;
+                                const rest = c.length;
+                                const stretchRatio = dist / rest;
+                                if (stretchRatio > 1 + threshold) {
+                                    const delta = dist - rest;
+                                    c.length += delta * rate;
+                                } else if (stretchRatio < 1 - threshold) {
+                                    const delta = rest - dist;
+                                    c.length -= delta * (rate * 0.5);
+                                    if (c.length < 2) c.length = 2;
+                                }
+                            }
+                        }
+                        // Update node positions
+                        this.blob.nodeVisuals.forEach((visual, i) => {
+                            const node = this.blob.nodes[i];
+                            visual.position.set(node.position.x, node.position.y, 0);
+                        });
+                        
+                        // Update constraint lines
+                        this.blob.constraintVisuals.forEach((visual, i) => {
+                            const constraint = this.constraints[i];
+                            const positionAttribute = visual.geometry.attributes.position;
+                            positionAttribute.array[0] = constraint.bodyA.position.x;
+                            positionAttribute.array[1] = constraint.bodyA.position.y;
+                            positionAttribute.array[2] = 0;
+                            positionAttribute.array[3] = constraint.bodyB.position.x;
+                            positionAttribute.array[4] = constraint.bodyB.position.y;
+                            positionAttribute.array[5] = 0;
+                            positionAttribute.needsUpdate = true;
+                        });
+                        
+                        // Update blob surface
+                        this.updateBlobSurface();
+                    }
+                }
+                
+                this.renderer.render(this.scene, this.camera);
+            }
+        }
+        
+        // Initialize simulation when page loads
+        window.addEventListener('load', () => {
+            window.sim = new BlobSimulation();
+        });
+        
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            // Update renderer size if needed
+        });
+    </script>
+</body>
+</html>
