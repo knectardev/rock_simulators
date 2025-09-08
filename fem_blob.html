@@ -291,6 +291,8 @@
                 const nodeBodies = [];
                 const nodeVisuals = [];
                 const coeffs = this.getMaterialCoefficients();
+                // Prevent self-collisions among nodes to reduce energy loss
+                const blobGroup = Matter.Body.nextGroup(true);
                 
                 // Create grid of nodes
                 const spacing = this.blobRadius * 2 / this.params.nodeDensity;
@@ -335,7 +337,8 @@
                                 friction: Math.min(1, this.params.blobFriction + coeffs.nodeFrictionExtra),
                                 frictionStatic: Math.min(1, this.params.blobFriction + coeffs.nodeFrictionExtra * 1.5),
                                 restitution: coeffs.restitution,
-                                frictionAir: coeffs.frictionAir
+                                frictionAir: coeffs.frictionAir,
+                                collisionFilter: { group: blobGroup }
                             });
                             
                             nodes.push(body);
@@ -486,14 +489,14 @@
                 const stiffnessBase = 0.12 + 0.82 * eNorm;       // 0.12..0.94 from elasticity
                 const stiffness = Math.max(0.02, Math.min(0.98, stiffnessBase - 0.20 * ooze));
                 // Less internal damping when elasticity is high (to allow bounce)
-                const damping = Math.max(0.01, 0.14 * (1 - eNorm) + 0.08 * v); 
+                const damping = Math.max(0.005, 0.10 * (1 - eNorm) + 0.06 * v); 
                 // Air drag reduced as elasticity increases so bounce energy is preserved
-                const frictionAir = Math.max(0, 0.003 + 0.010 * v * (1 - 0.75 * eNorm));
+                const frictionAir = Math.max(0, 0.0025 + 0.008 * v * (1 - 0.8 * eNorm));
                 // Extra surface friction reduced for high elasticity; higher when oozing
                 const nodeFrictionExtra = 0.35 * ooze * (1 - 0.6 * eNorm);
                 const groundFrictionExtra = 0.35 * ooze * (1 - 0.6 * eNorm);
                 // Restitution directly from elasticity, independent of viscosity
-                const restitution = Math.max(0, Math.min(1, 0.05 + 0.95 * eNorm));
+                const restitution = Math.max(0, Math.min(1, 0.10 + 0.95 * eNorm));
                 // Plasticity fades out as elasticity rises (so bouncy shapes don't permanently spread)
                 const plasticityThreshold = 0.05 + 0.08 * ooze * (1 - eNorm); // ~5%..13%
                 const plasticityRate = 0.5 * ooze * (1 - eNorm);             // 0..0.5, 0 when e high
@@ -526,7 +529,7 @@
                 const applyToWall = (wall) => {
                     wall.friction = Math.min(1, this.params.groundFriction + coeffs.groundFrictionExtra);
                     wall.frictionStatic = Math.min(1, this.params.groundFriction + coeffs.groundFrictionExtra * 1.5);
-                    wall.restitution = Math.max(0, 0.2 + 0.6 * coeffs.restitution);
+                    wall.restitution = Math.max(0, 0.25 + 0.7 * coeffs.restitution);
                 };
                 applyToWall(this.walls.ground);
                 applyToWall(this.walls.leftWall);
