@@ -85,6 +85,58 @@
             font-size: 11px;
             color: #888;
         }
+        
+        /* Right-side palette */
+        #palette {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            z-index: 2000;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px;
+            border-radius: 10px;
+            width: 180px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.6);
+            color: #eee;
+            pointer-events: auto;
+        }
+        #palette h3 {
+            margin: 0 0 10px 0;
+            font-size: 14px;
+        }
+        .palette-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: #111;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 8px;
+            margin-bottom: 10px;
+            cursor: grab;
+            user-select: none;
+        }
+        .palette-icon {
+            width: 36px;
+            height: 36px;
+            display: inline-block;
+            background: transparent;
+        }
+        .icon-circle {
+            border-radius: 50%;
+            border: 2px solid #ffd166;
+        }
+        .icon-square {
+            border: 2px solid #06d6a0;
+        }
+        .icon-triangle {
+            width: 0;
+            height: 0;
+            border-left: 18px solid transparent;
+            border-right: 18px solid transparent;
+            border-bottom: 32px solid #118ab2;
+            background: none;
+        }
     </style>
 </head>
 <body>
@@ -142,6 +194,23 @@
             </div>
         </div>
         
+        <div id="palette">
+            <h3>Obstacle Palette</h3>
+            <div class="palette-item" draggable="true" data-shape="circle" data-size="60">
+                <span class="palette-icon icon-circle"></span>
+                <span>Circle</span>
+            </div>
+            <div class="palette-item" draggable="true" data-shape="square" data-size="70">
+                <span class="palette-icon icon-square"></span>
+                <span>Square</span>
+            </div>
+            <div class="palette-item" draggable="true" data-shape="triangle" data-size="80">
+                <span class="palette-icon icon-triangle"></span>
+                <span>Triangle</span>
+            </div>
+            <div style="font-size:11px;color:#bbb;margin-top:6px;">Drag a shape onto the box</div>
+        </div>
+        
         <div id="info">
             WebGL 2D Finite Element Blob Simulation | FPS: <span id="fps">60</span>
         </div>
@@ -193,12 +262,16 @@
                 this.boxHeight = 600;
                 this.blobRadius = 100;
                 
+                // Obstacles list
+                this.obstacles = [];
+                
                 this.initThreeJS();
                 this.initMatter();
                 this.initControls();
                 this.initMouseControls();
                 this.createBox();
                 this.createBlob();
+                this.initPaletteDragDrop();
                 this.animate();
             }
             
@@ -221,6 +294,7 @@
                 this.renderer.domElement.style.left = '50%';
                 this.renderer.domElement.style.top = '50%';
                 this.renderer.domElement.style.transform = 'translate(-50%, -50%)';
+                this.renderer.domElement.style.zIndex = '1';
                 
                 // Lighting
                 const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
@@ -229,6 +303,140 @@
                 const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
                 directionalLight.position.set(0, 0, 200);
                 this.scene.add(directionalLight);
+            }
+
+            // HTML5 Drag & Drop from right palette onto canvas
+            initPaletteDragDrop() {
+                this.obstacles = []; // { body, visual, outline, shape }
+                const dom = this.renderer.domElement;
+                const paletteItems = document.querySelectorAll('.palette-item');
+                paletteItems.forEach((item) => {
+                    item.addEventListener('dragstart', (ev) => {
+                        ev.dataTransfer.setData('text/plain', JSON.stringify({
+                            shape: item.getAttribute('data-shape'),
+                            size: parseFloat(item.getAttribute('data-size') || '60')
+                        }));
+                        // set drag image to reduce flicker
+                        ev.dataTransfer.effectAllowed = 'copy';
+                    });
+                });
+                dom.addEventListener('dragover', (ev) => {
+                    ev.preventDefault();
+                    ev.dataTransfer.dropEffect = 'copy';
+                });
+                dom.addEventListener('drop', (ev) => {
+                    ev.preventDefault();
+                    const dataText = ev.dataTransfer.getData('text/plain');
+                    if (!dataText) return;
+                    let data;
+                    try { data = JSON.parse(dataText); } catch { return; }
+                    const dropPos = this.getMouseWorldPosition(ev);
+                    // Only allow drops inside the box bounds
+                    if (Math.abs(dropPos.x) > this.boxWidth/2 - 20 || Math.abs(dropPos.y) > this.boxHeight/2 - 20) return;
+                    this.addObstacle(data.shape, data.size, dropPos.x, dropPos.y);
+                });
+                
+                // Wheel to scale currently selected obstacle
+                dom.addEventListener('wheel', (ev) => {
+                    if (!this.selectedObstacle) return;
+                    ev.preventDefault();
+                    const scale = ev.deltaY < 0 ? 1.08 : 0.925; // zoom in/out
+                    this.scaleObstacle(this.selectedObstacle, scale);
+                }, { passive: false });
+            }
+
+            addObstacle(shape, size, x, y) {
+                // Implemented below with Matter.js body + Three.js visual
+                const coeffs = this.getMaterialCoefficients();
+                const common = { isStatic: true, friction: Math.min(1, this.params.groundFriction + coeffs.groundFrictionExtra), frictionStatic: Math.min(1, this.params.groundFriction + coeffs.groundFrictionExtra * 1.5), restitution: Math.max(0, 0.25 + 0.7 * coeffs.restitution) };
+                let body = null; let visual = null; let outline = null;
+                if (shape === 'circle') {
+                    const r = Math.max(10, size * 0.5);
+                    body = Matter.Bodies.circle(x, y, r, common);
+                    const geom = new THREE.CircleGeometry(r, 48);
+                    const mat = new THREE.MeshBasicMaterial({ color: 0xffd166, transparent: true, opacity: 0.25 });
+                    visual = new THREE.Mesh(geom, mat);
+                    outline = new THREE.LineLoop(new THREE.EdgesGeometry(new THREE.CircleGeometry(r, 48)), new THREE.LineBasicMaterial({ color: 0xffd166 }));
+                    outline.position.z = 0.1; visual.add(outline);
+                } else if (shape === 'square') {
+                    const half = Math.max(12, size * 0.5);
+                    body = Matter.Bodies.rectangle(x, y, half * 2, half * 2, common);
+                    const geom = new THREE.PlaneGeometry(half * 2, half * 2);
+                    const mat = new THREE.MeshBasicMaterial({ color: 0x06d6a0, transparent: true, opacity: 0.25, side: THREE.DoubleSide });
+                    visual = new THREE.Mesh(geom, mat);
+                    outline = new THREE.LineSegments(new THREE.EdgesGeometry(geom), new THREE.LineBasicMaterial({ color: 0x06d6a0 }));
+                    outline.position.z = 0.1; visual.add(outline);
+                } else {
+                    // triangle (equilateral)
+                    const r = Math.max(14, size * 0.6);
+                    const vertsWorld = [
+                        { x: x, y: y - r },
+                        { x: x - (Math.sqrt(3)/2) * r, y: y + r/2 },
+                        { x: x + (Math.sqrt(3)/2) * r, y: y + r/2 }
+                    ];
+                    body = Matter.Bodies.fromVertices(x, y, [vertsWorld], common);
+                    // Visual geometry centered at origin for proper scaling
+                    const local = [
+                        { x: 0, y: -r },
+                        { x: -(Math.sqrt(3)/2) * r, y: r/2 },
+                        { x: (Math.sqrt(3)/2) * r, y: r/2 }
+                    ];
+                    const shapeGeom = new THREE.BufferGeometry();
+                    const arr = new Float32Array([
+                        local[0].x, local[0].y, 0,
+                        local[1].x, local[1].y, 0,
+                        local[2].x, local[2].y, 0
+                    ]);
+                    shapeGeom.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+                    shapeGeom.setIndex([0,1,2]);
+                    const mat = new THREE.MeshBasicMaterial({ color: 0x118ab2, transparent: true, opacity: 0.25, side: THREE.DoubleSide });
+                    visual = new THREE.Mesh(shapeGeom, mat);
+                    const lineGeom = new THREE.BufferGeometry();
+                    const lineArr = new Float32Array([
+                        local[0].x, local[0].y, 0,
+                        local[1].x, local[1].y, 0,
+                        local[2].x, local[2].y, 0,
+                        local[0].x, local[0].y, 0
+                    ]);
+                    lineGeom.setAttribute('position', new THREE.BufferAttribute(lineArr, 3));
+                    outline = new THREE.Line(lineGeom, new THREE.LineBasicMaterial({ color: 0x118ab2 }));
+                    outline.position.z = 0.1; visual.add(outline);
+                }
+
+                if (!body || !visual) return;
+                Matter.World.add(this.world, body);
+                this.scene.add(visual);
+                visual.position.set(x, y, 0);
+                this.obstacles.push({ body, visual, outline, shape });
+                // Auto-select the most recently added obstacle
+                this.selectObstacle(this.obstacles[this.obstacles.length - 1]);
+            }
+
+            selectObstacle(ob) {
+                if (this.selectedObstacle === ob) return;
+                if (this.selectedObstacle && this.selectedObstacle.outline) {
+                    this.selectedObstacle.outline.material.color.setHex(this.selectedObstacle.shape === 'circle' ? 0xffd166 : (this.selectedObstacle.shape === 'square' ? 0x06d6a0 : 0x118ab2));
+                }
+                this.selectedObstacle = ob || null;
+                if (this.selectedObstacle && this.selectedObstacle.outline) {
+                    this.selectedObstacle.outline.material.color.setHex(0xffff66);
+                }
+            }
+
+            scaleObstacle(ob, scale) {
+                if (!ob || !ob.body || !ob.visual) return;
+                // Clamp size to avoid extremes
+                const minExtent = 12;
+                const maxExtent = Math.min(this.boxWidth, this.boxHeight);
+                // Predictively clamp by checking bounds after scaling visual's geometry size via scale property
+                // Scale physics body
+                Matter.Body.scale(ob.body, scale, scale);
+                // Scale visual
+                ob.visual.scale.set(ob.visual.scale.x * scale, ob.visual.scale.y * scale, 1);
+                // Ensure body stays within box
+                const bx = Math.max(-this.boxWidth/2 + 20, Math.min(this.boxWidth/2 - 20, ob.body.position.x));
+                const by = Math.max(-this.boxHeight/2 + 20, Math.min(this.boxHeight/2 - 20, ob.body.position.y));
+                Matter.Body.setPosition(ob.body, { x: bx, y: by });
             }
             
             initMatter() {
@@ -535,6 +743,15 @@
                 applyToWall(this.walls.leftWall);
                 applyToWall(this.walls.rightWall);
                 applyToWall(this.walls.ceiling);
+                // Apply to existing obstacles
+                if (this.obstacles) {
+                    for (const ob of this.obstacles) {
+                        if (!ob.body) continue;
+                        ob.body.friction = Math.min(1, this.params.groundFriction + coeffs.groundFrictionExtra);
+                        ob.body.frictionStatic = Math.min(1, this.params.groundFriction + coeffs.groundFrictionExtra * 1.5);
+                        ob.body.restitution = Math.max(0, 0.25 + 0.7 * coeffs.restitution);
+                    }
+                }
             }
             
             initControls() {
@@ -612,8 +829,18 @@
                 dom.style.userSelect = 'none';
                 
                 const onMouseDown = (event) => {
-                    if (!this.blob) return;
                     const mouseWorld = this.getMouseWorldPosition(event);
+                    // Check obstacle selection first
+                    const hit = this.findObstacleAtPoint(mouseWorld.x, mouseWorld.y);
+                    if (hit) {
+                        this.selectObstacle(hit);
+                        this.isDraggingObstacle = true;
+                        this.dragObstacleStart = { x: mouseWorld.x, y: mouseWorld.y };
+                        this.dragObstacleBodyStart = { x: hit.body.position.x, y: hit.body.position.y };
+                        event.preventDefault();
+                        return;
+                    }
+                    if (!this.blob) return;
                     const center = this.getBlobCenter();
                     const radius = this.getBlobRadiusEstimate();
                     const dx = mouseWorld.x - center.x;
@@ -625,12 +852,27 @@
                         // Snapshot node start positions
                         this.dragStartNodePositions = this.blob.nodes.map(n => ({ x: n.position.x, y: n.position.y }));
                         event.preventDefault();
+                    } else {
+                        this.selectObstacle(null);
                     }
                 };
                 
                 const onMouseMove = (event) => {
-                    if (!this.isDragging || !this.blob) return;
                     const mouseWorld = this.getMouseWorldPosition(event);
+                    if (this.isDraggingObstacle && this.selectedObstacle) {
+                        const dx = mouseWorld.x - this.dragObstacleStart.x;
+                        const dy = mouseWorld.y - this.dragObstacleStart.y;
+                        const nx = this.dragObstacleBodyStart.x + dx;
+                        const ny = this.dragObstacleBodyStart.y + dy;
+                        Matter.Body.setPosition(this.selectedObstacle.body, { x: nx, y: ny });
+                        // Update visuals immediately
+                        if (this.selectedObstacle.visual) {
+                            this.selectedObstacle.visual.position.set(nx, ny, 0);
+                        }
+                        event.preventDefault();
+                        return;
+                    }
+                    if (!this.isDragging || !this.blob) return;
                     const dx = mouseWorld.x - this.dragStartMouse.x;
                     const dy = mouseWorld.y - this.dragStartMouse.y;
                     
@@ -655,6 +897,11 @@
                         this.isDragging = false;
                         this.dragStartMouse = null;
                         this.dragStartNodePositions = [];
+                    }
+                    if (this.isDraggingObstacle) {
+                        this.isDraggingObstacle = false;
+                        this.dragObstacleStart = null;
+                        this.dragObstacleBodyStart = null;
                     }
                 };
                 
@@ -714,6 +961,18 @@
                 const intersection = new THREE.Vector3();
                 raycaster.ray.intersectPlane(plane, intersection);
                 return intersection;
+            }
+
+            findObstacleAtPoint(x, y) {
+                if (!this.obstacles || this.obstacles.length === 0) return null;
+                for (let i = this.obstacles.length - 1; i >= 0; i--) {
+                    const ob = this.obstacles[i];
+                    if (!ob.body) continue;
+                    // Use Matter.Query.point to test
+                    const result = Matter.Query.point([ob.body], { x, y });
+                    if (result && result.length) return ob;
+                }
+                return null;
             }
 
             getTwoTouchWorldPositions(event) {
@@ -859,6 +1118,14 @@
                 this.isRunning = false;
                 this.isPaused = false;
                 this.createBlob();
+                // Clear obstacles
+                if (this.obstacles && this.obstacles.length) {
+                    for (const ob of this.obstacles) {
+                        if (ob.visual) this.scene.remove(ob.visual);
+                        if (ob.body) Matter.World.remove(this.world, ob.body);
+                    }
+                    this.obstacles = [];
+                }
                 document.getElementById('startBtn').disabled = false;
                 document.getElementById('pauseBtn').disabled = true;
                 document.getElementById('reverseBtn').disabled = true;
@@ -940,6 +1207,15 @@
                         
                         // Update blob surface
                         this.updateBlobSurface();
+                    }
+                    // Sync obstacle visuals to physics bodies
+                    if (this.obstacles && this.obstacles.length) {
+                        for (const ob of this.obstacles) {
+                            if (!ob.body || !ob.visual) continue;
+                            ob.visual.position.set(ob.body.position.x, ob.body.position.y, 0);
+                            ob.visual.rotation.z = ob.body.angle;
+                            if (ob.outline) ob.outline.rotation.z = ob.visual.rotation.z;
+                        }
                     }
                 }
                 
