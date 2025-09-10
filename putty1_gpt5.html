@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Viscoelastic Blob (Burgers) – Minimal WebGL Demo</title>
+<style>
+  html, body { height: 100%; margin: 0; background:#0b0d10; color:#e6e8eb; font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
+  .wrap { display:grid; grid-template-columns: 320px 1fr; height:100%; }
+  .panel { padding:16px; overflow:auto; border-right:1px solid #1d2127; background:#0f1216; }
+  h1 { font-size:16px; margin:0 0 8px; }
+  .row { display:flex; align-items:center; gap:8px; margin:8px 0; }
+  .row label { width:170px; color:#aab2bd; }
+  .row input[type=range] { width:100%; }
+  .small { font-size:12px; color:#9aa2ad; }
+  .btns { display:flex; gap:8px; margin-top:8px; flex-wrap:wrap; }
+  button { background:#1b2330; color:#e6e8eb; border:1px solid #2c3644; padding:6px 10px; border-radius:8px; cursor:pointer; }
+  button:hover { background:#222c3a; }
+  canvas { display:block; width:100%; height:100%; }
+  .legend { margin-top:8px; }
+  .pill { display:inline-block; padding:2px 8px; border-radius:999px; border:1px solid #2c3644; margin-right:6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="panel">
+    <h1>Viscoelastic Blob (Burgers) – Minimal</h1>
+    <div class="small">CPU physics (discrete Burgers along edges), WebGL rendering. 2D quasi-FE triangle mesh. Gravity + ground contact + air drag. Mesh regenerates when density changes.</div>
+
+    <div class="row"><label>Mesh density</label><input id="mesh" type="range" min="8" max="48" step="1" value="24"><span id="meshVal">24</span></div>
+
+    <div class="row"><label>Blob radius (m)</label><input id="radius" type="range" min="0.25" max="1.0" step="0.01" value="0.6"><span id="radiusVal">0.60</span></div>
+    <div class="row"><label>Drop height (m)</label><input id="dropH" type="range" min="0.5" max="7.0" step="0.05" value="1.8"><span id="dropHVal">1.80</span></div>
+
+    <div class="row"><label>Density ρ (kg/m³)</label><input id="rho" type="range" min="200" max="2000" step="10" value="1100"><span id="rhoVal">1100</span></div>
+
+    <div class="row"><label>Gravity g (m/s²)</label><input id="grav" type="range" min="-2" max="20" step="0.1" value="9.81"><span id="gravVal">9.81</span></div>
+
+    <div class="row"><label>Air drag C<sub>d</sub></label><input id="air" type="range" min="0" max="5" step="0.05" value="0.6"><span id="airVal">0.60</span></div>
+
+    <div class="row"><label>Ground restitution e</label><input id="rest" type="range" min="0" max="0.8" step="0.02" value="0.25"><span id="restVal">0.25</span></div>
+
+    <div class="row"><label>Friction μ</label><input id="fric" type="range" min="0" max="1.0" step="0.02" value="0.35"><span id="fricVal">0.35</span></div>
+
+    <hr>
+    <div class="row"><label>Kelvin spring (Kk)</label><input id="Kk" type="range" min="50" max="5000" step="10" value="1500"><span id="KkVal">1500</span></div>
+    <div class="row"><label>Kelvin dashpot (Ck)</label><input id="Ck" type="range" min="1" max="200" step="1" value="40"><span id="CkVal">40</span></div>
+    <div class="row"><label>Maxwell spring (Km)</label><input id="Km" type="range" min="10" max="3000" step="10" value="400"><span id="KmVal">400</span></div>
+    <div class="row"><label>Maxwell dashpot (Cm)</label><input id="Cm" type="range" min="1" max="400" step="1" value="120"><span id="CmVal">120</span></div>
+
+    <div class="row"><label>Shear thinning (Carreau n)</label><input id="ncar" type="range" min="0.2" max="1.0" step="0.02" value="0.6"><span id="ncarVal">0.60</span></div>
+    <div class="row"><label>η<sub>0</sub> (low-rate)</label><input id="eta0" type="range" min="10" max="2000" step="10" value="400"><span id="eta0Val">400</span></div>
+    <div class="row"><label>η<sub>∞</sub> (high-rate)</label><input id="etai" type="range" min="0.1" max="50" step="0.1" value="8"><span id="etaiVal">8.0</span></div>
+    <div class="row"><label>λ<sub>c</sub> (Carreau time)</label><input id="lcar" type="range" min="0.001" max="0.5" step="0.001" value="0.06"><span id="lcarVal">0.060</span></div>
+
+    <hr>
+    <div class="row"><label>Frag. strain-rate τ̇* (1/s)</label><input id="fragSR" type="range" min="5" max="200" step="1" value="60"><span id="fragSRVal">60</span></div>
+    <div class="row"><label>Frag. prob. @τ̇*</label><input id="fragP" type="range" min="0" max="1" step="0.05" value="0.35"><span id="fragPVal">0.35</span></div>
+
+    <div class="btns">
+      <button id="reset">Reset blob</button>
+      <button id="drop">Drop from top</button>
+      <button id="toggleWire">Toggle wireframe</button>
+      <button id="splitNow">Force split</button>
+    </div>
+    <div class="row"><label>Show debug</label><input id="debug" type="checkbox" checked></div>
+    <div class="row"><label>Allow fracture</label><input id="fracture" type="checkbox"></div>
+    <div class="row"><label>Strain constraint</label><input id="constrain" type="checkbox"></div>
+    <div class="legend small">
+      <div class="pill">Blue = tensile edges</div>
+      <div class="pill">Red = compressive edges</div>
+      <div class="pill">White fill = triangles</div>
+    </div>
+    <div id="stats" class="small"></div>
+    <p class="small">Notes:<br>
+    • This demo discretizes a <em>Burgers</em> viscoelastic solid along mesh edges (Kelvin-Voigt ∥ Maxwell in series) and augments viscosity by a shear‑thinning Carreau law based on edge strain‑rate.<br>
+    • Air drag is quadratic on nodes. Ground uses restitution + Coulomb friction. A simple damage rule severs overstressed high‑rate edges to create fragments.<br>
+    • Time integrator: semi‑implicit Euler with velocity damping limiter for stability. Units are SI-ish but approximate; tune to taste.</p>
+  </div>
+  <canvas id="gl"></canvas>
+</div>
+<script>
+// ---- Minimal utilities ----
+const clamp = (x,a,b)=>Math.max(a,Math.min(b,x));
+const rand = (a,b)=>a + Math.random()*(b-a);
+const saturate = (x,limit)=> Math.tanh(x/Math.max(1e-6,limit))*limit;
+
+// ---- WebGL setup ----
+const canvas = document.getElementById('gl');
+const gl = canvas.getContext('webgl');
+if(!gl){ alert('WebGL not supported'); }
+function resize(){
+  const dpr = Math.min(2, window.devicePixelRatio||1);
+  const rect = canvas.getBoundingClientRect();
+  const w = Math.max(1, (canvas.clientWidth || rect.width) * dpr);
+  const h = Math.max(1, (canvas.clientHeight || rect.height) * dpr);
+  if(canvas.width !== w || canvas.height !== h){
+    canvas.width = w; canvas.height = h;
+  }
+  gl.viewport(0,0,canvas.width,canvas.height);
+}
+window.addEventListener('resize', resize);
+
+// Simple shader for colored triangles/lines
+const vertSrc = `attribute vec2 a_pos; attribute vec3 a_col; uniform vec2 u_scale; varying vec3 v_col; void main(){ v_col=a_col; vec2 p = a_pos * u_scale; gl_Position = vec4(p,0.,1.); gl_PointSize = 4.0; }`;
+const fragSrc = `precision mediump float; varying vec3 v_col; void main(){ gl_FragColor = vec4(v_col, 1.0); }`;
+function compile(type,src){ const s = gl.createShader(type); gl.shaderSource(s,src); gl.compileShader(s); if(!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw gl.getShaderInfoLog(s); return s; }
+function program(vs,fs){ const p = gl.createProgram(); gl.attachShader(p, compile(gl.VERTEX_SHADER, vs)); gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs)); gl.linkProgram(p); if(!gl.getProgramParameter(p, gl.LINK_STATUS)) throw gl.getProgramInfoLog(p); return p; }
+const prog = program(vertSrc, fragSrc); gl.useProgram(prog);
+const a_pos = gl.getAttribLocation(prog, 'a_pos');
+const a_col = gl.getAttribLocation(prog, 'a_col');
+const u_scale = gl.getUniformLocation(prog, 'u_scale');
+const vbo = gl.createBuffer();
+let debugOn = true;
+let spawnPos = null; // last requested spawn position in world coords
+const statsEl = document.getElementById('stats');
+let diag = { maxSdot:0, maxStrain:0, edgesCut:0 };
+let constrainInfo = { applied:0 };
+
+// ---- Simulation domain ----
+let params = {};
+const world = { w: 6, h: 8 }; // meters (approx)
+let nodes=[], edges=[], tris=[], groups=[]; // groups = fragments (array of node indices)
+let wire = true;
+
+// UI elements binding
+const ids = [ 'mesh','radius','dropH','rho','grav','air','rest','fric','Kk','Ck','Km','Cm','ncar','eta0','etai','lcar','fragSR','fragP','debug','fracture','constrain' ];
+const els = Object.fromEntries(ids.map(id=>[id, document.getElementById(id)]));
+const vals = Object.fromEntries(ids.map(id=>[id+'Val', document.getElementById(id+'Val')]));
+ids.forEach(id=>{ els[id].addEventListener('input', ()=>{ if(vals[id+'Val']) vals[id+'Val'].textContent = (+els[id].value).toFixed( (id==='mesh'?0: (['rho','Kk','Km','Ck','Cm','fragSR'].includes(id)?0:(id==='fragP'?2: (id==='etai'||id==='eta0'?1: (id==='dropH'||id==='radius'?2:2)))) ) ); if(id==='mesh'||id==='radius'){ initBlob(); } if(id==='debug'){ debugOn = els.debug.checked; } }); vals['meshVal'].textContent=els.mesh.value; });
+
+// Buttons
+document.getElementById('reset').onclick = ()=>initBlob();
+document.getElementById('drop').onclick = ()=>dropFromTop();
+document.getElementById('toggleWire').onclick = ()=>{ wire=!wire; };
+document.getElementById('splitNow').onclick = ()=>forceRandomSplit();
+
+// Click to spawn at mouse position in world coordinates
+canvas.addEventListener('click', (ev)=>{
+  const rect = canvas.getBoundingClientRect();
+  const px = (ev.clientX - rect.left) * (canvas.width / rect.width);
+  const py = (ev.clientY - rect.top) * (canvas.height / rect.height);
+  const ndcX = (px / canvas.width) * 2 - 1;
+  const ndcY = (1 - py / canvas.height) * 2 - 1;
+  const wx = ndcX * (world.w * 0.5);
+  const wy = ndcY * (world.h * 0.5);
+  console.log('click->spawn world:', { wx: +wx.toFixed(3), wy: +wy.toFixed(3) });
+  initBlob(wx, wy);
+});
+
+function readParams(){
+  const keepMass = (params && typeof params.nodeMass === 'number' && isFinite(params.nodeMass) && params.nodeMass>0) ? params.nodeMass : 1.0;
+  const keepInitArea = (params && typeof params.initArea === 'number' && isFinite(params.initArea) && params.initArea>0) ? params.initArea : 0.0;
+  params = {
+    mesh: +els.mesh.value|0,
+    R: +els.radius.value,
+    rho: +els.rho.value,
+    g: +els.grav.value,
+    air: +els.air.value,
+    rest: +els.rest.value,
+    mu: +els.fric.value,
+    Kk: +els.Kk.value,
+    Ck: +els.Ck.value,
+    Km: +els.Km.value,
+    Cm: +els.Cm.value,
+    n: +els.ncar.value,
+    eta0: +els.eta0.value,
+    etai: +els.etai.value,
+    lc: +els.lcar.value,
+    fragSR: +els.fragSR.value,
+    fragP: +els.fragP.value,
+    dropH: +els.dropH.value,
+    nodeMass: keepMass, // preserved; updated in initBlob()
+    initArea: keepInitArea,
+    fracOn: !!els.fracture.checked,
+    useConstraint: !!els.constrain.checked
+  };
+}
+
+function ensureValidMass(){
+  if(!(params.nodeMass>0) || !isFinite(params.nodeMass)){
+    if(params.initArea>0 && nodes.length>0){
+      const mass = params.initArea * params.rho * 0.1; // thickness 0.1 m
+      params.nodeMass = mass / nodes.length;
+      console.warn('nodeMass invalid; restored from initArea:', params.nodeMass);
+    }else{
+      params.nodeMass = 1.0;
+      console.error('nodeMass invalid and initArea unavailable; defaulting to 1.0');
+    }
+  }
+}
+
+// Positional strain constraint: keep edge length within [1-sClamp, 1+sClamp] * L0
+function constrainStrain(iterations){
+  const sClamp = 0.25; // 25% stretch/compress limit per edge
+  constrainInfo.applied = 0;
+  for(let it=0; it<(iterations|0); it++){
+    for(const e of edges){ if(e.cut) continue; const A=nodes[e.a], B=nodes[e.b];
+      let dx=B.x-A.x, dy=B.y-A.y; let L=Math.hypot(dx,dy); if(L<1e-8) continue; const nx=dx/L, ny=dy/L;
+      const Lmin = Math.max(1e-3, (1 - sClamp) * e.L0);
+      const Lmax = (1 + sClamp) * e.L0;
+      const Lclamped = Math.max(Lmin, Math.min(Lmax, L));
+      const delta = L - Lclamped; // positive if too long, negative if too short
+      if(delta !== 0){
+        const half = 0.5 * delta;
+        // Move endpoints toward clamped length (reduce length if too long, increase if too short)
+        A.x -= half*nx; A.y -= half*ny;
+        B.x += half*nx; B.y += half*ny;
+        // Velocity correction consistent with positional change per dt
+        const vCorr = (half / Math.max(1e-6, dt));
+        A.vx -= vCorr*nx; A.vy -= vCorr*ny;
+        B.vx += vCorr*nx; B.vy += vCorr*ny;
+        constrainInfo.applied++;
+      }
+    }
+  }
+}
+
+// Create a triangular disk mesh (roughly hexagonal packing via jittered polar grid)
+function initBlob(cx, cy){
+  readParams();
+  nodes = []; edges = []; tris = []; groups=[[]];
+  const N = params.mesh;
+  const R = params.R;
+  if(typeof cx === 'number' && typeof cy === 'number'){
+    spawnPos = { x: cx, y: cy };
+  }
+  if(!spawnPos){
+    const yTopBorder = world.h * 0.45;
+    const yStart = clamp(yTopBorder - (+document.getElementById('dropH').value), -world.h*0.45 + 0.2, yTopBorder - 0.2);
+    spawnPos = { x: 0, y: yStart };
+  }
+  // Generate a uniform grid inside the disk; triangulate as two triangles per grid cell
+  const h = Math.max(R/Math.max(8,N), R/(N)); // grid step
+  const nHalf = Math.max(2, Math.ceil(R/h));
+  const key = (ix,iy)=>ix+"_"+iy;
+  const idxMap = new Map();
+  for(let iy=-nHalf; iy<=nHalf; iy++){
+    for(let ix=-nHalf; ix<=nHalf; ix++){
+      const gx = ix*h, gy = iy*h;
+      if(gx*gx + gy*gy <= R*R){
+        const x = spawnPos.x + gx;
+        const y = spawnPos.y + gy;
+        const idx = nodes.length;
+        nodes.push({ x, y, vx:0, vy:0, fx:0, fy:0, group:0 });
+        idxMap.set(key(ix,iy), idx);
+      }
+    }
+  }
+
+  // Build triangles from grid quads fully inside the disk
+  for(let iy=-nHalf; iy<nHalf; iy++){
+    for(let ix=-nHalf; ix<nHalf; ix++){
+      const a = idxMap.get(key(ix,iy));
+      const b = idxMap.get(key(ix+1,iy));
+      const c = idxMap.get(key(ix,iy+1));
+      const d = idxMap.get(key(ix+1,iy+1));
+      if(a!==undefined && b!==undefined && c!==undefined){ tris.push([a,b,c]); }
+      if(b!==undefined && c!==undefined && d!==undefined){ tris.push([b,d,c]); }
+    }
+  }
+
+  // Build unique edges from tris
+  const map = new Map();
+  function addEdge(a,b){ const key = a<b? a+"_"+b : b+"_"+a; if(map.has(key)) return; map.set(key, edges.length); edges.push({ a:Math.min(a,b), b:Math.max(a,b), L0:0, // rest length
+    // Burgers internal variables
+    eps_m:0, // Maxwell dashpot strain along edge
+    Fk:0, Fm:0, // last forces (for viz)
+    cut:false }); }
+  for(const t of tris){ addEdge(t[0],t[1]); addEdge(t[1],t[2]); addEdge(t[2],t[0]); }
+
+  // Set initial lengths & masses per node from area
+  const minL0 = Math.max(0.02, R/(N*2)); // avoid near-zero rest lengths (stiffness blowups)
+  for(const e of edges){ const pa=nodes[e.a], pb=nodes[e.b]; const dx=pb.x-pa.x, dy=pb.y-pa.y; e.L0 = Math.max(minL0, Math.hypot(dx,dy)); }
+  // crude area= sum of triangle area; mass per node evenly from blob area * rho / Nnodes
+  const area = tris.reduce((s,t)=>{
+    const A=nodes[t[0]],B=nodes[t[1]],C=nodes[t[2]]; return s + Math.abs((A.x*(B.y-C.y)+B.x*(C.y-A.y)+C.x*(A.y-B.y))*0.5);
+  },0);
+  params.initArea = area;
+  const mass = area * params.rho * 0.1; // thickness 0.1 m (quasi-2D)
+  const mNode = mass / nodes.length; params.nodeMass = mNode;
+  groups=[nodes.map((_,i)=>i)];
+  ensureValidMass();
+  console.log('initBlob:', { nodes:nodes.length, edges:edges.length, tris:tris.length, nodeMass:+params.nodeMass.toFixed(6), center:spawnPos });
+}
+
+function dropFromTop(){
+  const dx = 0;
+  // Interpret dropH as distance measured DOWN from the top border
+  const yTopBorder = world.h * 0.45;
+  const yStart = clamp(yTopBorder - params.dropH, -world.h*0.45 + 0.2, yTopBorder - 0.2);
+  for(const n of nodes){ n.x += dx; n.y += (yStart - n.y); n.vx = 0; n.vy = 0; }
+}
+
+function forceRandomSplit(){
+  // cut top 10% longest-stressed edges
+  const cand = edges.filter(e=>!e.cut).sort((a,b)=> (Math.abs(b.Fk+b.Fm)) - (Math.abs(a.Fk+a.Fm)) ).slice(0, Math.max(3, (edges.length*0.05|0)));
+  for(const e of cand){ e.cut=true; }
+  rebuildGroups();
+}
+
+function rebuildGroups(){
+  // Build graph of uncut edges and find connected components
+  const adj = new Map();
+  for(let i=0;i<nodes.length;i++) adj.set(i,[]);
+  for(const e of edges){ if(e.cut) continue; adj.get(e.a).push(e.b); adj.get(e.b).push(e.a); }
+  const seen=new Set(); groups=[];
+  for(let i=0;i<nodes.length;i++) if(!seen.has(i)){
+    const stack=[i], comp=[]; seen.add(i);
+    while(stack.length){ const v=stack.pop(); comp.push(v); for(const w of adj.get(v)) if(!seen.has(w)){ seen.add(w); stack.push(w);} }
+    groups.push(comp);
+  }
+}
+
+// Carreau shear-thinning viscosity based on edge strain-rate gammaDot
+function etaCarreau(gdot){ const {eta0, etai, lc, n} = params; return etai + (eta0 - etai) * Math.pow(1 + Math.pow(lc * gdot, 2), (n-1)/2); }
+
+// Physics step
+let tPrev = 0; let dtBase = 1/120; let dt = dtBase; // fixed base step; dt may be subdivided adaptively
+function step(){
+  readParams();
+  // mass remains constant after init; only guard if it becomes invalid
+  ensureValidMass();
+  diag = { maxSdot:0, maxStrain:0, edgesCut:0 };
+  // reset forces
+  for(const n of nodes){ n.fx=0; n.fy = params.nodeMass * -params.g; }
+
+  // Edge forces (1D Burgers along edge)
+  const sdotMax = Math.max(2*params.fragSR, 25);
+  for(const e of edges){ if(e.cut) continue; const A=nodes[e.a], B=nodes[e.b];
+    let dx=B.x-A.x, dy=B.y-A.y; const L=Math.hypot(dx,dy)||1e-8; const nx=dx/L, ny=dy/L; // unit
+    const vrel = (B.vx-A.vx)*nx + (B.vy-A.vy)*ny; // relative velocity along edge
+    const denom = Math.max(1e-3, e.L0); // stabilize divisions
+    let strain = (L - e.L0)/denom; // engineering strain
+    const sdotRaw = vrel/denom; // strain-rate ≈ vrel/L0
+    const sdot = clamp(sdotRaw, -sdotMax, sdotMax);
+    strain = clamp(strain, -0.6, 0.8);
+    if(!isFinite(strain)) strain = 0;
+    if(!isFinite(this?.sdot)){}
+
+    // Effective dashpot viscosities with shear-thinning
+    const Ck_eff = params.Ck + etaCarreau(Math.abs(sdot));
+    const Cm_eff = params.Cm + 0.5*etaCarreau(Math.abs(sdot));
+
+    // Kelvin element (spring in parallel with dashpot)
+    let Fk = params.Kk * strain + Ck_eff * sdot; // force density (per unit)
+
+    // Maxwell element: spring strain = (total strain - dashpot strain)
+    const eps_s = strain - e.eps_m; // spring strain in Maxwell branch
+    let Fm = params.Km * eps_s; // spring stress proxy
+    // Dashpot evolution: de_m/dt = Fm / Cm_eff
+    e.eps_m += (Fm / Math.max(1e-6, Cm_eff)) * dt;
+
+    // Total axial force along edge (sign along +n)
+    let F = Fk + Fm;
+    F = saturate(F, params.Kk*0.8 + params.Km*0.8);
+
+    // Simple brittle rule: probabilistically cut if strain-rate high and tensile load
+    if(params.fracOn && sdotRaw > params.fragSR && F > 0){ if(Math.random() < params.fragP*dt) { e.cut=true; diag.edgesCut++; continue; } }
+
+    // apply to nodes
+    const fx = F * nx; const fy = F * ny;
+    A.fx += fx; A.fy += fy;
+    B.fx -= fx; B.fy -= fy;
+
+    e.Fk = Fk; e.Fm = Fm;
+    if(isFinite(sdotRaw)) diag.maxSdot = Math.max(diag.maxSdot, Math.abs(sdotRaw));
+    if(isFinite(strain)) diag.maxStrain = Math.max(diag.maxStrain, Math.abs(strain));
+  }
+
+  // Air drag ~ v^2
+  const rho_air = 1.2; const Cd = params.air*0.5; const area_node = (params.R*params.R*Math.PI)/nodes.length; // tame drag a bit
+  for(const n of nodes){ const v2 = n.vx*n.vx + n.vy*n.vy; const v = Math.sqrt(v2); if(v>1e-5){ const drag = 0.5*rho_air*Cd*area_node*v2; n.fx += -drag*(n.vx/v); n.fy += -drag*(n.vy/v); } }
+  // Buoyancy (optional): push up by displaced air; very small so blob still falls
+  const buoyancy = 0.0; // set to >0 to enable
+  if(buoyancy>0){ const Fb = buoyancy * params.nodeMass * params.g; for(const n of nodes){ n.fy += Fb; } }
+
+  // Integrate
+  const damp = 0.999; // lighter damping so gravity wins
+  const vmax = 10.0; // allow falling speeds while still capping spikes
+  for(const n of nodes){
+    n.vx = (n.vx + (n.fx/params.nodeMass)*dt)*damp;
+    n.vy = (n.vy + (n.fy/params.nodeMass)*dt)*damp;
+    const sp = Math.hypot(n.vx,n.vy);
+    if(sp>vmax){ const s=vmax/sp; n.vx*=s; n.vy*=s; }
+    n.x += n.vx*dt; n.y += n.vy*dt;
+    if(!isFinite(n.x) || !isFinite(n.y)){
+      console.warn('NaN detected, resetting node to spawnPos');
+      n.x = spawnPos?spawnPos.x:0; n.y = spawnPos?spawnPos.y:0; n.vx=0; n.vy=0;
+    }
+  }
+
+  // Ground collisions with restitution & Coulomb friction
+  const yGround = -world.h*0.45; const xLeft=-world.w*0.48, xRight=world.w*0.48;
+  for(const n of nodes){
+    // Floor
+    if(n.y < yGround){
+      // project to ground
+      n.y = yGround;
+      // normal impulse (inelastic according to restitution)
+      if(n.vy < 0){ n.vy = -n.vy * params.rest; }
+      // dynamic friction (Coulomb) using normal force ~ weight
+      const vt = n.vx; const N = params.nodeMass * Math.max(0, params.g);
+      const maxJ = params.mu * N * dt; const J = clamp(-vt*params.nodeMass, -maxJ, maxJ); n.vx += J/params.nodeMass;
+    }
+    }
+    // Side walls (inelastic)
+    if(n.x < xLeft){ n.x=xLeft; if(n.vx<0) n.vx *= -0.3; }
+    if(n.x > xRight){ n.x=xRight; if(n.vx>0) n.vx *= -0.3; }
+  }
+
+  // Optional positional constraint pass to prevent disassembly
+  if(params.useConstraint){ constrainStrain(2); }
+
+  // If any edges were cut, rebuild fragments (affects nothing yet but future logic can vary mass props)
+  // (We keep mass per node constant; fragment behavior emerges from graph disconnects)
+  // Note: call occasionally to avoid O(E) every frame
+  if(Math.random()<0.02) rebuildGroups();
+}
+
+// ---- Rendering ----
+function render(){
+  gl.clearColor(0.05,0.07,0.1,1); gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.useProgram(prog);
+  gl.viewport(0,0,canvas.width,canvas.height);
+  const sx = 2/world.w, sy = 2/world.h; gl.uniform2f(u_scale, sx, sy);
+
+  // build vertex array: triangles first
+  const verts = [];
+  if(!wire){
+    for(const t of tris){
+      const A=nodes[t[0]], B=nodes[t[1]], C=nodes[t[2]];
+      verts.push(A.x, A.y, 1,1,1,  B.x,B.y, 1,1,1,  C.x,C.y, 1,1,1);
+    }
+  }
+  // edges overlay colored by sign of (Fk+Fm)
+  for(const e of edges){ if(e.cut) continue; const A=nodes[e.a], B=nodes[e.b]; const s = e.Fk+e.Fm; const col = s>=0? [0.1,0.6,1.0]:[1.0,0.25,0.25];
+    verts.push(A.x, A.y, ...col,  B.x,B.y, ...col);
+  }
+  // Debug frame rectangle and crosshair at origin (append after edges)
+  if(debugOn){
+    const xL=-world.w*0.48, xR=world.w*0.48, yB=-world.h*0.45, yT=world.h*0.45;
+    const c=[0.3,0.3,0.3];
+    verts.push(xL,yB, ...c,  xR,yB, ...c);
+    verts.push(xR,yB, ...c,  xR,yT, ...c);
+    verts.push(xR,yT, ...c,  xL,yT, ...c);
+    verts.push(xL,yT, ...c,  xL,yB, ...c);
+    verts.push(-0.25,0, 1,0.9,0.2,  0.25,0, 1,0.9,0.2);
+    verts.push(0,-0.25, 1,0.9,0.2,  0,0.25, 1,0.9,0.2);
+    if(spawnPos){
+      const c2=[1.0,0.75,0.2]; const s=0.15;
+      verts.push(spawnPos.x - s, spawnPos.y, ...c2,  spawnPos.x + s, spawnPos.y, ...c2);
+      verts.push(spawnPos.x, spawnPos.y - s, ...c2,  spawnPos.x, spawnPos.y + s, ...c2);
+    }
+  }
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.DYNAMIC_DRAW);
+  gl.enableVertexAttribArray(a_pos);
+  gl.vertexAttribPointer(a_pos, 2, gl.FLOAT, false, 5*4, 0);
+  gl.enableVertexAttribArray(a_col);
+  gl.vertexAttribPointer(a_col, 3, gl.FLOAT, false, 5*4, 2*4);
+
+  let triCount = wire? 0 : tris.length;
+  if(triCount){ gl.drawArrays(gl.TRIANGLES, 0, triCount*3); }
+  const lineStart = triCount*3;
+  const lineCount = (verts.length/5 - lineStart);
+  if(lineCount>0){ gl.lineWidth(1.0); gl.drawArrays(gl.LINES, lineStart, lineCount); }
+}
+
+// ---- Main loop ----
+function loop(ts){
+  // Adaptive substeps based on max strain-rate from previous step
+  const sdot = diag.maxSdot || 0;
+  const sRef = Math.max(10, params.fragSR);
+  // ensure at least 2 substeps for smoother ground interaction
+  const substeps = clamp(Math.ceil(sdot/sRef), 2, 8);
+  const oldDt = dt; dt = dtBase / substeps; // smaller dt per substep
+  for(let i=0;i<substeps;i++) step();
+  dt = oldDt; // restore
+  render();
+  if(statsEl){ const totalMass = (params.nodeMass*nodes.length); statsEl.textContent = `nodes: ${nodes.length}  edges: ${edges.length}  tris: ${tris.length}  groups: ${groups.length}  substeps: ${substeps}  nodeMass: ${params.nodeMass.toFixed(4)}  totalMass: ${totalMass.toFixed(2)}  max|strain|: ${diag.maxStrain.toFixed(3)}  max|sdot|: ${diag.maxSdot.toFixed(2)}  cuts: ${diag.edgesCut}  constrained: ${constrainInfo.applied}  spawn: (${spawnPos?spawnPos.x.toFixed(2):'—'}, ${spawnPos?spawnPos.y.toFixed(2):'—'})`; }
+  requestAnimationFrame(loop);
+}
+
+// ---- Kickoff ----
+resize(); initBlob(); dropFromTop();
+// Ensure we size correctly once layout is settled then start
+setTimeout(()=>{ resize(); requestAnimationFrame(loop); }, 0);
+</script>
+</body>
+</html>

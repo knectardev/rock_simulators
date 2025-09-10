@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Viscoelastic Blob Simulation</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Inter', sans-serif;
+            background-color: #1a1a1a;
+            color: #e0e0e0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+        }
+        canvas {
+            display: block;
+            background-color: #2c2c2c;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+        .controls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(44, 44, 44, 0.8);
+            padding: 15px 25px;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 15px;
+        }
+        .slider-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        label {
+            font-size: 14px;
+            font-weight: 500;
+        }
+        input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 200px;
+            height: 8px;
+            background: #4a4a4a;
+            border-radius: 5px;
+            outline: none;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 18px;
+            height: 18px;
+            background: #007aff;
+            cursor: pointer;
+            border-radius: 50%;
+            border: 2px solid #fff;
+        }
+        input[type="range"]::-moz-range-thumb {
+            width: 18px;
+            height: 18px;
+            background: #007aff;
+            cursor: pointer;
+            border-radius: 50%;
+             border: 2px solid #fff;
+        }
+        #resetButton {
+            background-color: #007aff;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background-color 0.2s;
+        }
+        #resetButton:hover {
+            background-color: #0056b3;
+        }
+    </style>
+     <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <canvas id="glCanvas"></canvas>
+    <div class="controls">
+        <div class="slider-container">
+            <label for="meshDensity">Mesh Density:</label>
+            <input type="range" id="meshDensity" min="5" max="20" value="10" step="1">
+             <span id="densityValue">10</span>
+        </div>
+        <button id="resetButton">Reset Simulation</button>
+    </div>
+
+    <script id="vertex-shader" type="x-shader/x-vertex">
+        attribute vec2 a_position;
+        uniform vec2 u_resolution;
+        void main() {
+           vec2 zeroToOne = a_position / u_resolution;
+           vec2 zeroToTwo = zeroToOne * 2.0;
+           vec2 clipSpace = zeroToTwo - 1.0;
+           gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1);
+        }
+    </script>
+
+    <script id="fragment-shader" type="x-shader/x-fragment">
+        precision mediump float;
+        uniform vec4 u_color;
+        void main() {
+           gl_FragColor = u_color;
+        }
+    </script>
+
+    <script>
+        // --- Main Setup ---
+        const canvas = document.getElementById('glCanvas');
+        const gl = canvas.getContext('webgl');
+        const meshDensitySlider = document.getElementById('meshDensity');
+        const densityValueSpan = document.getElementById('densityValue');
+        const resetButton = document.getElementById('resetButton');
+
+        let animationFrameId;
+
+        // --- Shader Program Setup ---
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            const success = gl.getShaderParameter(shader, gl.COMPILE_STATUS);
+            if (success) {
+                return shader;
+            }
+            console.error(gl.getShaderInfoLog(shader));
+            gl.deleteShader(shader);
+        }
+
+        function createProgram(gl, vertexShader, fragmentShader) {
+            const program = gl.createProgram();
+            gl.attachShader(program, vertexShader);
+            gl.attachShader(program, fragmentShader);
+            gl.linkProgram(program);
+            const success = gl.getProgramParameter(program, gl.LINK_STATUS);
+            if (success) {
+                return program;
+            }
+            console.error(gl.getProgramInfoLog(program));
+            gl.deleteProgram(program);
+        }
+
+        const vertexShaderSource = document.getElementById("vertex-shader").text;
+        const fragmentShaderSource = document.getElementById("fragment-shader").text;
+        const vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
+        const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
+        const program = createProgram(gl, vertexShader, fragmentShader);
+
+        // --- GLSL Attribute and Uniform Locations ---
+        const positionAttributeLocation = gl.getAttribLocation(program, "a_position");
+        const resolutionUniformLocation = gl.getUniformLocation(program, "u_resolution");
+        const colorUniformLocation = gl.getUniformLocation(program, "u_color");
+        const positionBuffer = gl.createBuffer();
+        const indexBuffer = gl.createBuffer();
+
+        // --- Physics Simulation Parameters ---
+        const GRAVITY = 0.5;
+        const AIR_FRICTION = 0.995;
+        const GROUND_FRICTION = 0.8;
+        const GROUND_BOUNCE = 0.5; 
+        
+        let points = [];
+        let sticks = [];
+        let triangles = [];
+
+        // --- Physics Engine Classes ---
+        class Point {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.oldX = x;
+                this.oldY = y;
+                this.isPinned = false;
+            }
+
+            update() {
+                if (this.isPinned) return;
+                const vx = (this.x - this.oldX) * AIR_FRICTION;
+                const vy = (this.y - this.oldY) * AIR_FRICTION;
+                
+                this.oldX = this.x;
+                this.oldY = this.y;
+
+                this.x += vx;
+                this.y += vy;
+                this.y += GRAVITY;
+            }
+
+            constrain() {
+                if (this.isPinned) return;
+                 const vx = (this.x - this.oldX) * AIR_FRICTION;
+                 const vy = (this.y - this.oldY) * AIR_FRICTION;
+
+                // Frame constraints
+                if (this.x > canvas.width) {
+                    this.x = canvas.width;
+                    this.oldX = this.x + vx * GROUND_BOUNCE;
+                } else if (this.x < 0) {
+                    this.x = 0;
+                    this.oldX = this.x + vx * GROUND_BOUNCE;
+                }
+
+                if (this.y > canvas.height) {
+                    this.y = canvas.height;
+                    this.oldY = this.y + vy * GROUND_BOUNCE;
+                    // Apply ground friction
+                    this.oldX = this.x - vx * (1 - GROUND_FRICTION);
+                } else if (this.y < 0) {
+                    this.y = 0;
+                    this.oldY = this.y + vy * GROUND_BOUNCE;
+                }
+            }
+        }
+
+        class Stick {
+            constructor(p0, p1) {
+                this.p0 = p0;
+                this.p1 = p1;
+                this.length = this.distance(p0, p1);
+            }
+
+            distance(p0, p1) {
+                const dx = p1.x - p0.x;
+                const dy = p1.y - p0.y;
+                return Math.sqrt(dx * dx + dy * dy);
+            }
+            
+            // This function is the core of the viscoelastic model
+            update() {
+                const dx = this.p1.x - this.p0.x;
+                const dy = this.p1.y - this.p0.y;
+                const currentLength = Math.sqrt(dx * dx + dy * dy);
+                const difference = this.length - currentLength;
+                const percent = difference / currentLength / 2;
+
+                // --- Rheology Model ---
+                // Calculate strain rate (velocity difference along the stick axis)
+                const p0vx = this.p0.x - this.p0.oldX;
+                const p0vy = this.p0.y - this.p0.oldY;
+                const p1vx = this.p1.x - this.p1.oldX;
+                const p1vy = this.p1.y - this.p1.oldY;
+                const relVx = p1vx - p0vx;
+                const relVy = p1vy - p0vy;
+                const strainRate = (relVx * dx + relVy * dy) / (currentLength * currentLength + 1e-6); // Dot product
+
+                // Determine material properties based on strain rate
+                let stiffness = 0.5; // Default "oozing" stiffness (Domain 1)
+                
+                // If stretching quickly (impact), become much stiffer (Domain 2)
+                if (strainRate > 0.5) {
+                    stiffness = 1.0; 
+                }
+                
+                // If compressing quickly (impact), also become stiffer
+                if (strainRate < -0.5) {
+                    stiffness = 1.0;
+                }
+                // --- End Rheology Model ---
+
+                const offsetX = dx * percent * stiffness;
+                const offsetY = dy * percent * stiffness;
+
+                if (!this.p0.isPinned) {
+                    this.p0.x -= offsetX;
+                    this.p0.y -= offsetY;
+                }
+                if (!this.p1.isPinned) {
+                    this.p1.x += offsetX;
+                    this.p1.y += offsetY;
+                }
+            }
+        }
+
+
+        // --- Simulation Initialization ---
+        function createBlob(density) {
+            points = [];
+            sticks = [];
+            triangles = [];
+
+            const radius = 100;
+            const centerX = canvas.width / 2;
+            const centerY = 150;
+            const angleStep = (Math.PI * 2) / density;
+
+            // Center point
+            points.push(new Point(centerX, centerY));
+
+            // Outer points
+            for (let i = 0; i < density; i++) {
+                const angle = i * angleStep;
+                const x = centerX + Math.cos(angle) * radius * (0.8 + Math.random() * 0.4);
+                const y = centerY + Math.sin(angle) * radius * (0.8 + Math.random() * 0.4);
+                points.push(new Point(x, y));
+            }
+            
+            // Add jitter to inner points for more organic look
+            const innerPoints = density / 2;
+             for (let i = 0; i < innerPoints; i++) {
+                const angle = i * (Math.PI * 2 / innerPoints) + angleStep/2;
+                const x = centerX + Math.cos(angle) * radius * 0.5 * (0.8 + Math.random() * 0.4);
+                const y = centerY + Math.sin(angle) * radius * 0.5 * (0.8 + Math.random() * 0.4);
+                points.push(new Point(x,y));
+            }
+
+
+            // Create sticks
+            // Connect outer points to center
+            for (let i = 1; i <= density; i++) {
+                sticks.push(new Stick(points[0], points[i]));
+            }
+            
+            // Connect outer points to each other
+            for (let i = 1; i < density; i++) {
+                sticks.push(new Stick(points[i], points[i + 1]));
+            }
+            sticks.push(new Stick(points[density], points[1]));
+            
+            // Connect inner points to center
+             for(let i=density+1; i < points.length; i++){
+                sticks.push(new Stick(points[0], points[i]));
+             }
+
+            // Connect outer to inner
+            for (let i = 1; i <= density; i++) {
+                let closestInner = -1;
+                let minDist = Infinity;
+                for (let j = density + 1; j < points.length; j++) {
+                    const d = sticks[0].distance(points[i], points[j]);
+                    if (d < minDist) {
+                        minDist = d;
+                        closestInner = j;
+                    }
+                }
+                if (closestInner !== -1) {
+                     sticks.push(new Stick(points[i], points[closestInner]));
+                }
+            }
+             
+            // Connect inner points
+            for(let i=density+1; i < points.length -1; i++){
+                 sticks.push(new Stick(points[i], points[i+1]));
+            }
+             if(points.length > density+2){
+                 sticks.push(new Stick(points[points.length-1], points[density+1]));
+             }
+
+
+            // Create triangles for rendering (simple fan from center)
+            for (let i = 1; i < density; i++) {
+                triangles.push(0, i, i + 1);
+            }
+            triangles.push(0, density, 1);
+        }
+
+        // --- Main Loop ---
+        function update() {
+            // Update physics
+            points.forEach(p => p.update());
+            
+            // Multiple stick iterations for stability
+            for (let i = 0; i < 5; i++) {
+                sticks.forEach(s => s.update());
+                points.forEach(p => p.constrain());
+            }
+
+            // Render
+            render();
+            animationFrameId = requestAnimationFrame(update);
+        }
+
+        // --- Rendering ---
+        function render() {
+            gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+
+            gl.useProgram(program);
+            
+            // Update vertex buffer
+            const positions = [];
+            points.forEach(p => positions.push(p.x, p.y));
+            
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.DYNAMIC_DRAW);
+            
+            // Update index buffer
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(triangles), gl.STATIC_DRAW);
+
+            gl.enableVertexAttribArray(positionAttributeLocation);
+            gl.vertexAttribPointer(positionAttributeLocation, 2, gl.FLOAT, false, 0, 0);
+
+            gl.uniform2f(resolutionUniformLocation, gl.canvas.width, gl.canvas.height);
+            gl.uniform4f(colorUniformLocation, 0.0, 0.47, 1.0, 1.0); // Blob color
+
+            gl.drawElements(gl.TRIANGLES, triangles.length, gl.UNSIGNED_SHORT, 0);
+        }
+
+        // --- Event Listeners and Initialization ---
+        function handleResize() {
+            const size = Math.min(window.innerWidth * 0.9, window.innerHeight * 0.9, 800);
+            canvas.width = size;
+            canvas.height = size;
+        }
+        
+        function reset() {
+             if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+            }
+            let density = parseInt(meshDensitySlider.value);
+            densityValueSpan.textContent = density;
+            createBlob(density);
+            update();
+        }
+
+        meshDensitySlider.addEventListener('input', (event) => {
+             densityValueSpan.textContent = event.target.value;
+        });
+
+        meshDensitySlider.addEventListener('change', reset);
+        resetButton.addEventListener('click', reset);
+        
+        window.addEventListener('resize', () => {
+             handleResize();
+             reset();
+        });
+
+        // --- Initial Start ---
+        handleResize();
+        gl.clearColor(0.17, 0.17, 0.17, 1);
+        reset();
+
+    </script>
+</body>
+</html>

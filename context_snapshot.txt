@@ -1,0 +1,25 @@
+Context snapshot for 'rock_simulators'
+Timestamp (local): Tuesday, September 9, 2025
+Workspace: C:\local_dev\rock_simulators
+OS: win32 10.0.26100
+Shell: C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe
+Persistent assistant memory: none (blank slate unless you ask me to save)
+Session todos: none
+Edits this session: created context_snapshot.txt
+User rules: Context-Aware Modification & Documentation Sync
+Project files:
+  - chatgot5-refactor1.html
+  - chatgot5-refactor1b.html
+  - fem_blob.html
+  - fold_compression.html
+  - index.html
+  - layer_shear.html
+  - sonnet-blob.html
+  - voronoi2.html
+  - tiles\fem_blob.png
+  - tiles\fold_compression.png
+  - tiles\layer_shear.png
+  - tiles\voronio1.png
+  - tiles\voronoi2.png
+  - tiles\voronoi3.png
+

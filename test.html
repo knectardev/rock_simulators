@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang='en-GB'>
+    <head>
+        <title>Soft Body Physics</title>
+        <meta charset='utf-8' />
+        <meta name='viewport' content='width=device-width, initial-scale=1' />
+
+        <meta name='title' content='Soft Body Physics'>
+        <meta name='description' content='A physics simulation of a soft body.'>
+        <meta name='keywords' content='p5.js,Physics Simulation'>
+        <meta name='robots' content='index, follow'>
+        <meta http-equiv='Content-Type' content='text/html; charset=utf-8'>
+        <meta name='language' content='English'>
+        <meta name='author' content='Nathaniel Brookes'>
+
+        <meta property='og:type' content='article'>
+        <meta property='og:title' content='Soft Body Physics'>
+        <meta property='og:url' content='https://www.nathanielbrookes.com/projects/soft-body-physics'>
+        <meta property='og:image' content='https://www.nathanielbrookes.com/assets/projects/thumbnails/4340bd9cd9e2af25fb010db3026d83e2.png'>
+        <meta property='og:description' content='A physics simulation of a soft body.'>
+        <meta property='article:author' content='Nathaniel Brookes'>
+
+        <meta property='article:tag' content='p5.js' /><meta property='article:tag' content='Physics Simulation' />
+        <link rel='stylesheet' href='../assets/css/main.css' type='text/css' />
+        <link rel='stylesheet' href='../assets/css/project.css' type='text/css' />
+        <link rel='canonical' href='https://www.nathanielbrookes.com/projects/soft-body-physics' />
+        
+        <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+        <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+        <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+        <link rel="manifest" href="/site.webmanifest">
+        <link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+        <meta name="msapplication-TileColor" content="#da532c">
+        <meta name="theme-color" content="#ffffff">
+        <style>
+            /* Custom Slider */
+
+            input[type=range] {
+                background: transparent;
+                -webkit-appearance: none;
+            }
+
+            input[type=range]:focus {
+                outline: none;
+            }
+
+            input[type=range]::-ms-track {
+                background: transparent; 
+                border-color: transparent;
+                color: transparent;
+                cursor: pointer;
+            }
+
+            input[type=range]::-webkit-slider-thumb {
+                -webkit-appearance: none;
+                background-color: #FFF;
+                border: 1px solid #777;
+                box-shadow: 1px 1px 2px rgba(0,0,0,0.75);
+                cursor: pointer;
+                height: 30px;
+                margin-top: -4px;
+                width: 16px;
+            }
+
+            input[type=range]::-webkit-slider-runnable-track {
+                border: none;
+                cursor: pointer;
+                height: 22px;
+                width: 100%;
+            }
+        </style>
+        <script>
+            let aspectRatio = null;
+            let controls = {};
+            let playButton, stopButton;
+
+            function SetPlay(value) {
+                var playElement = playButton.element;
+                var stopElement = false;
+
+                if (stopButton !== undefined) {
+                    console.log(stopButton);
+                    stopElement = stopButton.element;
+                }
+                
+                if (value) {
+                    playElement.classList.remove('paused');
+                    playElement.setAttribute('title', 'Pause');
+                    playElement.children[0].children[0].setAttribute('d', 'M48 64C21.5 64 0 85.5 0 112V400c0 26.5 21.5 48 48 48H80c26.5 0 48-21.5 48-48V112c0-26.5-21.5-48-48-48H48zm192 0c-26.5 0-48 21.5-48 48V400c0 26.5 21.5 48 48 48h32c26.5 0 48-21.5 48-48V112c0-26.5-21.5-48-48-48H240z');
+                }
+                else {
+                    playElement.classList.add('paused');
+                    playElement.setAttribute('title', 'Play');
+                    playElement.children[0].children[0].setAttribute('d', 'M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z');
+                }
+
+                // Enable Stop Button
+                if (stopElement) {
+                    stopElement.classList.remove('stopped');
+                    stopElement.disabled = false;
+                    stopElement.setAttribute('title', 'Stop');
+                }
+
+                // Inform iframe about event:
+                const message = JSON.stringify({
+                    message: 'control-event',
+                    id: playButton.id,
+                    type: 'change',
+                    value: value
+                });
+                document.getElementById('main-frame').contentWindow.postMessage(message, '*');
+            }
+            
+            window.addEventListener('message', function (e) {
+                let data;
+                
+                try {
+                    data = JSON.parse(e.data);
+                }
+                catch(e) {
+                    return;
+                }    
+
+                if (data.message == 'add-control') {
+                    var controlType = data.control.type;
+                    
+                    control = controls[data.control.id] = {
+                        id: data.control.id,
+                        element: null
+                    };
+                    
+                    var controlElement = document.createElement('div');
+                    controlElement.id = data.control.id + '-element';
+                    controlElement.classList.add('control-element');
+                    controlElement.classList.add(controlType);
+                    document.getElementById('controls-container').appendChild(controlElement);
+
+                    if (controlType == 'slider') {
+                        var controlLabel = document.createElement('label');
+                        controlLabel.classList.add('control-label');
+                        controlLabel.setAttribute('for', data.control.id + '-input');
+                        controlLabel.innerText = data.control.state.name;
+                        controlElement.appendChild(controlLabel);
+                        
+                        var sliderContainer = document.createElement('div');
+                        controlElement.appendChild(sliderContainer);
+                        
+                        control.element = document.createElement('input');
+                        control.element.classList.add('control-input');
+                        control.element.id = data.control.id + '-input';
+                        control.element.type = 'range';
+                        control.element.min = data.control.state.min;
+                        control.element.max = data.control.state.max;
+                        control.element.step = data.control.state.step;
+                        control.element.value = data.control.state.value;
+                        sliderContainer.appendChild(control.element);
+
+                        UpdateSlider(control.element);
+                                                
+                        var valueText = document.createElement('span');
+                        valueText.classList.add('control-value');
+                        valueText.id = data.control.id + '-value';
+                        valueText.innerText = data.control.state.value;
+                        sliderContainer.appendChild(valueText);
+
+                        control.element.addEventListener('input', function() {
+                            var controlElement = document.getElementById(data.control.id + '-input');
+
+                            UpdateSlider(controlElement);
+
+                            // Update value text for control
+                            var value = Number(this.value);
+                            document.getElementById(data.control.id + '-value').innerText = value;
+
+                            // Inform iframe about event
+                            const message = JSON.stringify({
+                                message: 'control-event',
+                                id: data.control.id,
+                                type: 'input',
+                                value: value,
+
+                            });
+                            document.getElementById('main-frame').contentWindow.postMessage(message, '*');
+                        });
+
+                        control.element.addEventListener('change', function() {
+                            var value = Number(this.value);
+                            
+                            // Inform iframe about event:
+                            const message = JSON.stringify({
+                                message: 'control-event',
+                                id: data.control.id,
+                                type: 'change',
+                                value: value
+                            });
+                            document.getElementById('main-frame').contentWindow.postMessage(message, '*');
+                        });
+                    }
+                    else if (controlType == 'checkbox') {
+                        var controlLabel = document.createElement('label');
+                        controlLabel.classList.add('control-label');
+                        controlLabel.setAttribute('for', data.control.id + '-input');
+                        controlLabel.innerText = data.control.state.name;
+                        controlElement.appendChild(controlLabel);
+                        
+                        control.element = document.createElement('input');
+                        control.element.classList.add('control-input');
+                        control.element.id = data.control.id + '-input';
+                        control.element.type = 'checkbox';
+                        control.element.checked = data.control.state.value;
+                        controlElement.appendChild(control.element);
+
+                        control.element.addEventListener('change', function() {
+                            var value = Boolean(this.checked);
+                            
+                            // Inform iframe about event:
+                            const message = JSON.stringify({
+                                message: 'control-event',
+                                id: data.control.id,
+                                type: 'change',
+                                value: value
+                            });
+                            document.getElementById('main-frame').contentWindow.postMessage(message, '*');
+                        });
+                    }
+                    else if (controlType == 'play-button') {
+                        control.element = document.createElement('button');
+                        control.element.classList.add('control-button');
+                        control.element.id = data.control.id + '-button';
+                        control.element.setAttribute('title', 'Pause');
+                        if (data.control.state.value == false) {
+                            control.element.classList.add('paused');
+                            control.element.setAttribute('title', 'Play');
+                        }
+                        controlElement.appendChild(control.element);
+
+                        /* Font Awesome Pro 6.4.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license (Commercial License) Copyright 2023 Fonticons, Inc. */
+
+                        var svgElement = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                        svgElement.setAttribute('viewBox', '0 0 384 512');  
+                        control.element.appendChild(svgElement);
+
+                        var svgPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                        if (data.control.state.value == false) {
+                            svgPath.setAttribute('d', 'M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z');
+                        }
+                        else {
+                            svgPath.setAttribute('d', 'M48 64C21.5 64 0 85.5 0 112V400c0 26.5 21.5 48 48 48H80c26.5 0 48-21.5 48-48V112c0-26.5-21.5-48-48-48H48zm192 0c-26.5 0-48 21.5-48 48V400c0 26.5 21.5 48 48 48h32c26.5 0 48-21.5 48-48V112c0-26.5-21.5-48-48-48H240z');
+                        }
+                        svgElement.appendChild(svgPath);
+
+                        control.element.addEventListener('click', function() {
+                            SetPlay(this.classList.contains('paused'));
+                        });
+
+                        playButton = control;
+                    }
+                    else if (controlType == 'stop-button') {
+                        control.element = document.createElement('button');
+                        control.element.classList.add('control-button');
+                        control.element.id = data.control.id + '-button';
+                        control.element.setAttribute('title', 'Stop');
+                        if (data.control.state.value == true) {
+                            control.element.disabled = true;
+                            control.element.classList.add('stopped');
+                            control.element.setAttribute('title', '');
+                        }
+                        controlElement.appendChild(control.element);
+
+                        /* Font Awesome Pro 6.4.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license (Commercial License) Copyright 2023 Fonticons, Inc. */
+
+                        var svgElement = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                        svgElement.setAttribute('viewBox', '0 0 384 512');  
+                        control.element.appendChild(svgElement);
+
+                        var svgPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                        svgPath.setAttribute('d', 'M0 128C0 92.7 28.7 64 64 64H320c35.3 0 64 28.7 64 64V384c0 35.3-28.7 64-64 64H64c-35.3 0-64-28.7-64-64V128z');
+                        svgElement.appendChild(svgPath);
+
+                        control.element.addEventListener('click', function() {
+                            if (!this.classList.contains('stopped')) {
+                                // Pause Animation
+                                SetPlay(false);
+                                
+                                this.classList.add('stopped');
+                                this.setAttribute('title', '');
+                                this.disabled = true;
+
+                                // Inform iframe about event:
+                                const message = JSON.stringify({
+                                    message: 'control-event',
+                                    id: data.control.id,
+                                    type: 'stop',
+                                    value: true
+                                });
+                                document.getElementById('main-frame').contentWindow.postMessage(message, '*');
+                            }
+                        });
+
+                        stopButton = control;
+                    }
+                }
+                else if (data.message == 'remove-control') {
+                    var controlElement = document.getElementById(data.control.id + '-element');
+                    controlElement.remove();
+                }
+                else if (data.message == 'init') {
+                    aspectRatio = data.aspectRatio;
+
+                    if (aspectRatio != null) {
+                        document.body.classList.add('aspect');
+                    }
+
+                    ResizeFrame();
+                }
+                else if (data.message == 'ready') {
+                    var section = document.getElementById('section-controls');
+                    console.log(section.firstElementChild);
+                    ToggleSection(section.firstElementChild);
+                }
+            });
+
+            var lastResizeUpdate;
+
+            function ResizeFrame() {
+                if (aspectRatio != null) {
+                    var viewport = document.getElementById('main-frame-container');
+                    var frame = document.getElementById('main-frame');
+
+                    var viewportHeight = viewport.offsetHeight;
+                    var viewportWidth = viewport.offsetWidth;
+                    
+                    if (viewportHeight/viewportWidth < 1/aspectRatio) {
+                        frame.height = viewportHeight;
+                        frame.width = viewportHeight * aspectRatio;
+                    }
+                    else {
+                        frame.height = viewportWidth * 1/aspectRatio;
+                        frame.width = viewportWidth;
+                    }
+
+                    frame.style.height = frame.height + 'px';
+                    frame.style.width = frame.width + 'px';
+
+                    lastResizeUpdate = Date.now();
+                } 
+            }
+
+            function UpdateSlider(element) {
+                var value = (element.value-element.min)/(element.max-element.min)*100;
+                element.style.background = 'linear-gradient(to right, #4EABF8 0%, #0080e9 ' + value + '%, #DDD ' + value + '%, #DDD 100%)';
+            }
+
+            function TogglePanel() {
+                var panel = document.getElementById('sidebar-container');
+                var button = document.getElementById('sidebar-toggle');
+                
+                if (panel.classList.contains('collapsed')) {
+                    panel.classList.remove('collapsed');
+                    button.setAttribute('title', 'Collapse Panel');
+                }
+                else {
+                    panel.classList.add('collapsed');
+                    button.setAttribute('title', 'Open Panel');
+                }
+
+                setTimeout(function() {
+                    if(Date.now() - lastResizeUpdate > 750) {
+                        ResizeFrame();
+                    } 
+                }, 750);
+            }
+
+            function ToggleElementClass(element, className) {
+                if (element.classList.contains(className)) {
+                    element.classList.remove(className);
+                }
+                else {
+                    element.classList.add(className);
+                }
+            }
+
+            window.onload = function() {
+                if (aspectRatio == null) {
+                    document.body.classList.add('fullscreen');
+                }
+                else {
+                    document.body.classList.add('aspect');
+                }
+                
+                ResizeFrame();
+
+                // Tell iframe to start:
+                const message = JSON.stringify({
+                    message: 'start'
+                });
+                document.getElementById('main-frame').contentWindow.postMessage(message, '*');
+            }
+
+            var resizeTimeout;
+
+            function Resize(w, h) {
+                ResizeFrame();
+                
+                if (window.innerWidth != w || window.innerHeight != h) {
+                    resizeTimeout = setTimeout(function() {
+                        Resize(window.innerWidth, window.innerHeight);
+                    }, 750);
+                }
+            }
+
+            window.onresize = function() {
+                if (resizeTimeout != null) {
+                    clearTimeout(resizeTimeout);
+                }
+                Resize(0,0);
+            }
+        
+            function ToggleSection(element) {
+                console.log(element);
+
+                var button = element;
+                var section = element.parentElement;
+                
+                if (section.classList.contains('focused')) {
+                    button.setAttribute('title', 'Show ' + section.getAttribute('name'));
+                    section.classList.remove('focused');
+                }
+                else {
+                    // Code below would only allow 1 section to be in focus at a time
+                    
+                    /*var sections = document.getElementsByTagName('section');
+                    for (var i = 0; i < sections.length; i++) {
+                        sections[i].classList.remove('focused');
+                    }*/
+
+                    button.setAttribute('title', 'Hide ' + section.getAttribute('name'));
+                    section.classList.add('focused');
+                }
+            }
+        </script>
+    </head>
+    <body>
+        <!-- Primary Navigation Header -->    
+        <div id='content-overlay' onclick='document.body.classList.remove("nav-visible")'></div>
+<header>
+    <span id='header-menu-btn' onclick='ToggleElementClass(document.body, "nav-visible")'>
+        <svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 448 512'><!--! Font Awesome Pro 6.4.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license (Commercial License) Copyright 2023 Fonticons, Inc. --><path d='M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z'/></svg>
+    </span>
+    <a id='header-logo' href='/'>Nathaniel Brookes</a>
+    <nav id='header-nav'>
+        <ul>
+            <li class=''><a href='/'>
+                <span>Home</span>
+            </a></li>
+            <li class=''><a href='/about'>
+                <span>About Me</span>
+            </a></li>
+            <li class=''><a href='/projects'>
+                <span>Interactive Projects</span>
+            </a></li>
+        </ul>
+        <div id='contact-btn-container'>
+            <a id='contact-btn' href='/contact'>Contact Me</a>
+        </div>
+    </nav>
+</header>
+        <div id='content'>
+            <div id='sidebar-container'>
+                <main id='main'>
+                    <a href='../projects' class='return-link'>
+                        <svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 448 512'><!--! Font Awesome Pro 6.4.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license (Commercial License) Copyright 2023 Fonticons, Inc. --><path d='M9.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.2 288 416 288c17.7 0 32-14.3 32-32s-14.3-32-32-32l-306.7 0L214.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z'/></svg>
+                        <span>All Projects</span>
+                    </a>
+                    <h1 id='project-name'>Soft Body Physics</h1>
+                    <p id='project-desc'>A physics simulation of a soft body.</p>
+                    <div id='tag-container'>
+                                            </div>
+                   
+                    <!-- Font Awesome Pro 6.4.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license (Commercial License) Copyright 2023 Fonticons, Inc. -->
+                    <section id='section-details' name='Details'>
+                                    <div class='section-header' onclick='ToggleSection(this);' title='Show Details'>
+                                        <h2>Details</h2>
+                                        <span id='toggle-details' class='section-toggle'>
+                                            <svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 320 512'><path d='M137.4 374.6c12.5 12.5 32.8 12.5 45.3 0l128-128c9.2-9.2 11.9-22.9 6.9-34.9s-16.6-19.8-29.6-19.8L32 192c-12.9 0-24.6 7.8-29.6 19.8s-2.2 25.7 6.9 34.9l128 128z'/></svg>
+                                        </span>
+                                    </div>
+                                    <div id='details-content' class='section-content'><h4>Background</h4>
+<p>I have followed the implementation provided by Maciej Matyka in <a href='https://www.researchgate.net/publication/228574502_How_to_implement_a_pressure_soft_body_model' target='_blank'>this paper</a> to create a 2D physics simulation of a soft body.</p>
+<p>The paper provides a minimum implementation of a pressure soft-body model using the C programming language — I have adapted this in Javascript so that it can be accessed online.</p>
+<p>I have also used the p5.js library for handling the vector manipulations and for visualising the simulation.<br><br></p>
+<h4>How It Works</h4>
+<p>As opposed to rigid bodies (where the object's shape is fixed), the shape of soft bodies can deform and change as they interact with other bodies or when a force is applied to them.</p>
+<p>In this simulation, the soft body is composed of many points/nodes, which are connected by invisible springs. Each node is connected by two springs (one for each adjacent node).</p>
+<p>The simulation first calculates and accumulates the forces that are acting on each node. External forces (e.g. gravity) are processed first, followed by the internal forces of the springs. Finally, an internal pressure force is added which inflates the object like a balloon and prevents it from collapsing.</p>
+<p>Once all forces have been accumulated, Euler Integration is used to work out the new positions of every node. This is used to update the animation.<br><br></p>
+<h4>Collision Detection and Handling</h4>
+<p>To simulate collision detection with the walls, the program regularly checks every node to see whether its position is outside the canvas.</p>
+<p>The program checks the x and y position values separately, and if either value goes outside the canvas, the program will invert the relevant component of the node's velocity. For example, if a node's x position value is outside the canvas, the x component of the node's velocity will be inverted. This simulates an effect similar to a laser beam bouncing off a mirror.</p>
+<p>I have also used min() and max() functions to constrain each node's position. This ensures that if a node is outside the canvas, it will be moved back within the bounds of the canvas.</p>
+<p><strong>Note:</strong> Checking every node is probably not the best way to implement collision detection, but I've chosen to use this simple implementation. There are other more efficient ways — For example, you could use Spatial Partitioning to reduce the number of nodes that need to be checked.<br><br></p>
+<h4>Interact With This Simulation</h4>
+<p>You can move the soft body by clicking and dragging your mouse pointer across the screen.</p>
+<p>You can also modify the properties of the soft body by changing the parameters below.</p></div>
+                                </section>    
+                    
+                    <section id='section-controls' name='Controls'>
+                        <div class='section-header' onclick='ToggleSection(this);' title='Show Controls'>
+                            <h2>Controls</h2>
+                            <span id='toggle-controls' class='section-toggle'>
+                                <svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 320 512'><path d='M137.4 374.6c12.5 12.5 32.8 12.5 45.3 0l128-128c9.2-9.2 11.9-22.9 6.9-34.9s-16.6-19.8-29.6-19.8L32 192c-12.9 0-24.6 7.8-29.6 19.8s-2.2 25.7 6.9 34.9l128 128z'/></svg>
+                            </span>
+                        </div>
+                        <div id='controls-content' class='section-content'>
+                            <div id='controls-container'></div>
+                        </div>
+                    </section>
+                </main>
+                <button id='sidebar-toggle' title='Collapse Panel' onclick='TogglePanel();'>
+                    <svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 512'><path d='M9.4 278.6c-12.5-12.5-12.5-32.8 0-45.3l128-128c9.2-9.2 22.9-11.9 34.9-6.9s19.8 16.6 19.8 29.6l0 256c0 12.9-7.8 24.6-19.8 29.6s-25.7 2.2-34.9-6.9l-128-128z'/></svg>
+                </button>
+            </div>
+            <div id='main-frame-container'>
+                <iframe id='main-frame' src='soft-body-physics/fullscreen'></iframe>
+            </div>
+        </div>
+    </body>
+</html>

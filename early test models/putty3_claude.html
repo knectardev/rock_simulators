@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Silly Putty Viscoelastic FEM Simulation</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: linear-gradient(135deg, #1e3c72, #2a5298);
+            color: white;
+            overflow-x: hidden;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        }
+        
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            margin-bottom: 20px;
+            padding: 20px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            min-width: 150px;
+        }
+        
+        label {
+            font-weight: 600;
+            font-size: 0.9em;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        }
+        
+        input[type="range"] {
+            width: 150px;
+            height: 6px;
+            border-radius: 3px;
+            background: rgba(255,255,255,0.3);
+            outline: none;
+            -webkit-appearance: none;
+        }
+        
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #4CAF50;
+            cursor: pointer;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        }
+        
+        button {
+            padding: 12px 24px;
+            background: linear-gradient(45deg, #4CAF50, #45a049);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(76, 175, 80, 0.3);
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(76, 175, 80, 0.4);
+        }
+        
+        #canvas {
+            display: block;
+            margin: 20px auto;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            background: #000;
+        }
+        
+        .info {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        .info-panel {
+            padding: 20px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 0.9em;
+            margin-left: 10px;
+        }
+        
+        .domain-1 { background: #2196F3; }
+        .domain-2 { background: #FF9800; }
+        .domain-3 { background: #F44336; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Silly Putty Viscoelastic FEM Simulation</h1>
+        
+        <div class="controls">
+            <div class="control-group">
+                <label for="meshDensity">Mesh Density: <span id="meshValue">25</span></label>
+                <input type="range" id="meshDensity" min="15" max="50" value="25">
+            </div>
+            
+            <div class="control-group">
+                <label for="dropHeight">Drop Height: <span id="heightValue">200</span> px</label>
+                <input type="range" id="dropHeight" min="50" max="400" value="200">
+            </div>
+            
+            <div class="control-group">
+                <label for="viscosity">Viscosity (Pa·s): <span id="viscValue">1000</span></label>
+                <input type="range" id="viscosity" min="100" max="5000" value="1000" step="100">
+            </div>
+            
+            <div class="control-group">
+                <label for="elasticity">Elasticity (MPa): <span id="elastValue">2.0</span></label>
+                <input type="range" id="elasticity" min="0.5" max="10.0" value="2.0" step="0.1">
+            </div>
+            
+            <div class="control-group">
+                <button onclick="resetSimulation()">Reset Simulation</button>
+                <button onclick="togglePause()">Pause/Resume</button>
+            </div>
+        </div>
+        
+        <canvas id="canvas" width="800" height="600"></canvas>
+        
+        <div class="info">
+            <div class="info-panel">
+                <h3>Current State</h3>
+                <p>Domain: <span id="currentDomain">Domain 1 - At Rest</span></p>
+                <p>Impact Velocity: <span id="impactVel">0.0</span> m/s</p>
+                <p>Strain Rate: <span id="strainRate">0.000</span> s⁻¹</p>
+                <p>Time: <span id="simTime">0.0</span> s</p>
+            </div>
+            
+            <div class="info-panel">
+                <h3>Physics Domains</h3>
+                <p><strong>Domain 1:</strong> At rest (< 1 m/s) - Creep/Burgers model</p>
+                <p><strong>Domain 2:</strong> Bouncy (1-5 m/s) - Navier-Stokes + Oldroyd-B</p>
+                <p><strong>Domain 3:</strong> Brittle (> 10 m/s) - Elastic fragmentation</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Canvas and WebGL setup
+        const canvas = document.getElementById('canvas');
+        const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+        
+        if (!gl) {
+            alert('WebGL not supported');
+        }
+        
+        // Simulation parameters
+        let params = {
+            meshDensity: 25,
+            dropHeight: 200,
+            viscosity: 1000,      // Pa·s
+            elasticity: 2.0e6,    // Pa (converted from MPa)
+            gravity: 9.81,        // m/s²
+            airFriction: 0.1,
+            density: 1200,        // kg/m³ (typical for silly putty)
+            timeStep: 0.001,
+            paused: false
+        };
+        
+        // Physics state
+        let simulationState = {
+            time: 0,
+            currentDomain: 1,
+            impactVelocity: 0,
+            strainRate: 0,
+            nodes: [],
+            elements: [],
+            velocities: [],
+            accelerations: [],
+            stresses: [],
+            strains: [],
+            isGrounded: false,
+            bounceCount: 0
+        };
+        
+        // Material properties for different domains
+        const materialProps = {
+            domain1: { // At rest - Burgers model parameters
+                springConstant1: 1e6,    // Pa (Maxwell spring)
+                springConstant2: 1e5,    // Pa (Voigt spring)
+                dashpotVisc1: 1e9,       // Pa·s (Maxwell dashpot)
+                dashpotVisc2: 1e8,       // Pa·s (Voigt dashpot)
+                relaxationTime: 10       // seconds
+            },
+            domain2: { // Bouncy - Oldroyd-B model parameters
+                polymerVisc: 0.1,        // Polymer viscosity
+                solventVisc: 0.001,      // Solvent viscosity
+                relaxationTime: 0.1,     // seconds
+                retardationTime: 0.01    // seconds
+            },
+            domain3: { // Brittle - Elastic parameters
+                youngModulus: 1e9,       // Pa
+                poissonRatio: 0.3,
+                fractureStress: 1e6      // Pa
+            }
+        };
+        
+        // Mesh generation
+        function generateMesh() {
+            const density = params.meshDensity;
+            simulationState.nodes = [];
+            simulationState.elements = [];
+            simulationState.velocities = [];
+            simulationState.accelerations = [];
+            simulationState.stresses = [];
+            simulationState.strains = [];
+            
+            // Create blob-shaped mesh
+            const centerX = canvas.width / 2;
+            const centerY = params.dropHeight;
+            const radius = 60;
+            
+            // Generate nodes in blob shape
+            for (let i = 0; i < density; i++) {
+                for (let j = 0; j < density; j++) {
+                    const angle = (i / density) * 2 * Math.PI;
+                    const r = (j / density) * radius;
+                    const x = centerX + r * Math.cos(angle) + (Math.random() - 0.5) * 10;
+                    const y = centerY + r * Math.sin(angle) * 0.7 + (Math.random() - 0.5) * 10;
+                    
+                    // Only add nodes within blob boundary
+                    const distFromCenter = Math.sqrt((x - centerX)**2 + ((y - centerY) / 0.7)**2);
+                    if (distFromCenter <= radius) {
+                        simulationState.nodes.push({ x, y, originalX: x, originalY: y });
+                        simulationState.velocities.push({ x: 0, y: 0 });
+                        simulationState.accelerations.push({ x: 0, y: 0 });
+                        simulationState.stresses.push({ xx: 0, yy: 0, xy: 0 });
+                        simulationState.strains.push({ xx: 0, yy: 0, xy: 0, rate: 0 });
+                    }
+                }
+            }
+            
+            // Generate triangular elements using Delaunay-like approach
+            for (let i = 0; i < simulationState.nodes.length - 2; i++) {
+                for (let j = i + 1; j < simulationState.nodes.length - 1; j++) {
+                    for (let k = j + 1; k < simulationState.nodes.length; k++) {
+                        const n1 = simulationState.nodes[i];
+                        const n2 = simulationState.nodes[j];
+                        const n3 = simulationState.nodes[k];
+                        
+                        // Check if triangle is valid (not too large or degenerate)
+                        const d12 = Math.sqrt((n1.x - n2.x)**2 + (n1.y - n2.y)**2);
+                        const d23 = Math.sqrt((n2.x - n3.x)**2 + (n2.y - n3.y)**2);
+                        const d13 = Math.sqrt((n1.x - n3.x)**2 + (n1.y - n3.y)**2);
+                        
+                        if (d12 < 40 && d23 < 40 && d13 < 40) {
+                            simulationState.elements.push({ nodes: [i, j, k], area: 0 });
+                        }
+                    }
+                }
+            }
+            
+            // Calculate element areas
+            simulationState.elements.forEach(element => {
+                const [i, j, k] = element.nodes;
+                const n1 = simulationState.nodes[i];
+                const n2 = simulationState.nodes[j];
+                const n3 = simulationState.nodes[k];
+                
+                element.area = 0.5 * Math.abs(
+                    (n2.x - n1.x) * (n3.y - n1.y) - (n3.x - n1.x) * (n2.y - n1.y)
+                );
+            });
+        }
+        
+        // Determine current physics domain based on impact velocity and strain rate
+        function determineDomain(velocity, strainRate) {
+            const speed = Math.sqrt(velocity.x**2 + velocity.y**2);
+            
+            if (speed >= 10) {
+                return 3; // Brittle domain
+            } else if (speed >= 1) {
+                return 2; // Bouncy domain  
+            } else {
+                return 1; // At rest domain
+            }
+        }
+        
+        // Burgers model for Domain 1 (creep behavior)
+        function applyBurgersModel(nodeIndex, dt) {
+            const node = simulationState.nodes[nodeIndex];
+            const stress = simulationState.stresses[nodeIndex];
+            const strain = simulationState.strains[nodeIndex];
+            const props = materialProps.domain1;
+            
+            // Burgers model: ε = σ/E₁ + (σ/η₁)t + σ/E₂(1-e^(-E₂t/η₂))
+            const gravitationalStress = params.density * params.gravity;
+            
+            // Maxwell element (instantaneous + delayed elastic)
+            const maxwellStrain = gravitationalStress / props.springConstant1 + 
+                                 (gravitationalStress / props.dashpotVisc1) * simulationState.time;
+            
+            // Voigt element (delayed elastic)
+            const voigtStrain = (gravitationalStress / props.springConstant2) * 
+                               (1 - Math.exp(-props.springConstant2 * simulationState.time / props.dashpotVisc2));
+            
+            const totalStrain = maxwellStrain + voigtStrain;
+            
+            // Apply creep deformation (spreading)
+            if (simulationState.isGrounded && node.y >= canvas.height - 50) {
+                const creepRate = totalStrain * dt * 0.1;
+                const centerX = canvas.width / 2;
+                const directionX = node.x > centerX ? 1 : -1;
+                
+                simulationState.velocities[nodeIndex].x += directionX * creepRate;
+                simulationState.velocities[nodeIndex].y = 0;
+            }
+        }
+        
+        // Oldroyd-B model for Domain 2 (viscoelastic bouncing)
+        function applyOldroydBModel(nodeIndex, dt) {
+            const velocity = simulationState.velocities[nodeIndex];
+            const stress = simulationState.stresses[nodeIndex];
+            const props = materialProps.domain2;
+            
+            // Oldroyd-B constitutive equation
+            // τ + λ₁(∂τ/∂t) = η₀(γ̇ + λ₂(∂γ̇/∂t))
+            
+            const strainRate = simulationState.strains[nodeIndex].rate;
+            const totalViscosity = props.polymerVisc + props.solventVisc;
+            
+            // Polymer stress contribution
+            const polymerStress = props.polymerVisc * strainRate * 
+                                 Math.exp(-dt / props.relaxationTime);
+            
+            // Update stress tensor
+            stress.xx += polymerStress * dt;
+            stress.yy += polymerStress * dt;
+            
+            // Apply viscoelastic force
+            const forceX = -stress.xx / params.density;
+            const forceY = -stress.yy / params.density;
+            
+            simulationState.accelerations[nodeIndex].x += forceX;
+            simulationState.accelerations[nodeIndex].y += forceY;
+        }
+        
+        // Elastic model for Domain 3 (brittle fracture)
+        function applyElasticModel(nodeIndex, dt) {
+            const node = simulationState.nodes[nodeIndex];
+            const stress = simulationState.stresses[nodeIndex];
+            const props = materialProps.domain3;
+            
+            // Linear elastic stress-strain relationship
+            const strainXX = simulationState.strains[nodeIndex].xx;
+            const strainYY = simulationState.strains[nodeIndex].yy;
+            const strainXY = simulationState.strains[nodeIndex].xy;
+            
+            // Hooke's law for plane stress
+            const factor = props.youngModulus / (1 - props.poissonRatio**2);
+            
+            stress.xx = factor * (strainXX + props.poissonRatio * strainYY);
+            stress.yy = factor * (strainYY + props.poissonRatio * strainXX);
+            stress.xy = props.youngModulus * strainXY / (2 * (1 + props.poissonRatio));
+            
+            // Check for fracture
+            const vonMisesStress = Math.sqrt(stress.xx**2 + stress.yy**2 - 
+                                           stress.xx * stress.yy + 3 * stress.xy**2);
+            
+            if (vonMisesStress > props.fractureStress) {
+                // Fragment the material (remove node or reduce connectivity)
+                simulationState.velocities[nodeIndex].x += (Math.random() - 0.5) * 100;
+                simulationState.velocities[nodeIndex].y += (Math.random() - 0.5) * 100;
+            }
+        }
+        
+        // Main physics update
+        function updatePhysics(dt) {
+            if (params.paused) return;
+            
+            // Calculate strain rates
+            simulationState.nodes.forEach((node, i) => {
+                const vel = simulationState.velocities[i];
+                simulationState.strains[i].rate = Math.sqrt(vel.x**2 + vel.y**2) / 100; // Approximation
+                
+                // Determine domain for this node
+                const domain = determineDomain(vel, simulationState.strains[i].rate);
+                if (i === 0) { // Use first node as representative
+                    simulationState.currentDomain = domain;
+                    simulationState.impactVelocity = Math.sqrt(vel.x**2 + vel.y**2);
+                    simulationState.strainRate = simulationState.strains[i].rate;
+                }
+            });
+            
+            // Apply domain-specific physics
+            simulationState.nodes.forEach((node, i) => {
+                // Reset accelerations
+                simulationState.accelerations[i] = { x: 0, y: 0 };
+                
+                // Apply gravity
+                simulationState.accelerations[i].y += params.gravity * 100; // Scale for pixels
+                
+                // Apply air friction
+                const vel = simulationState.velocities[i];
+                const friction = params.airFriction * Math.sqrt(vel.x**2 + vel.y**2);
+                simulationState.accelerations[i].x -= vel.x * friction;
+                simulationState.accelerations[i].y -= vel.y * friction;
+                
+                // Apply domain-specific models
+                switch (simulationState.currentDomain) {
+                    case 1:
+                        applyBurgersModel(i, dt);
+                        break;
+                    case 2:
+                        applyOldroydBModel(i, dt);
+                        break;
+                    case 3:
+                        applyElasticModel(i, dt);
+                        break;
+                }
+                
+                // Update velocity and position
+                simulationState.velocities[i].x += simulationState.accelerations[i].x * dt;
+                simulationState.velocities[i].y += simulationState.accelerations[i].y * dt;
+                
+                node.x += simulationState.velocities[i].x * dt;
+                node.y += simulationState.velocities[i].y * dt;
+                
+                // Ground collision
+                if (node.y >= canvas.height - 20) {
+                    node.y = canvas.height - 20;
+                    
+                    if (simulationState.velocities[i].y > 0) {
+                        // Bouncing behavior depends on domain
+                        let restitution = 0.1; // Default for domain 1
+                        
+                        if (simulationState.currentDomain === 2) {
+                            restitution = 0.6; // More bouncy
+                        } else if (simulationState.currentDomain === 3) {
+                            restitution = 0.9; // Very bouncy/brittle
+                        }
+                        
+                        simulationState.velocities[i].y *= -restitution;
+                        simulationState.isGrounded = true;
+                        simulationState.bounceCount++;
+                    }
+                }
+                
+                // Wall collisions
+                if (node.x <= 20) {
+                    node.x = 20;
+                    simulationState.velocities[i].x *= -0.5;
+                }
+                if (node.x >= canvas.width - 20) {
+                    node.x = canvas.width - 20;
+                    simulationState.velocities[i].x *= -0.5;
+                }
+            });
+            
+            simulationState.time += dt;
+        }
+        
+        // Rendering
+        function render() {
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw frame
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 3;
+            ctx.strokeRect(20, 20, canvas.width - 40, canvas.height - 40);
+            
+            // Draw ground
+            ctx.fillStyle = '#444';
+            ctx.fillRect(20, canvas.height - 20, canvas.width - 40, 20);
+            
+            // Draw blob
+            if (simulationState.nodes.length === 0) return;
+            
+            // Color based on domain
+            let blobColor = '#2196F3'; // Domain 1 - blue
+            if (simulationState.currentDomain === 2) blobColor = '#FF9800'; // Domain 2 - orange
+            if (simulationState.currentDomain === 3) blobColor = '#F44336'; // Domain 3 - red
+            
+            // Draw filled blob using convex hull approximation
+            ctx.fillStyle = blobColor + '80';
+            ctx.strokeStyle = blobColor;
+            ctx.lineWidth = 2;
+            
+            ctx.beginPath();
+            
+            // Simple blob outline using nodes
+            const sortedNodes = simulationState.nodes.slice().sort((a, b) => {
+                const centerX = canvas.width / 2;
+                const centerY = canvas.height / 2;
+                const angleA = Math.atan2(a.y - centerY, a.x - centerX);
+                const angleB = Math.atan2(b.y - centerY, b.x - centerX);
+                return angleA - angleB;
+            });
+            
+            if (sortedNodes.length > 0) {
+                ctx.moveTo(sortedNodes[0].x, sortedNodes[0].y);
+                for (let i = 1; i < sortedNodes.length; i += 3) { // Sample nodes for smoother outline
+                    ctx.lineTo(sortedNodes[i].x, sortedNodes[i].y);
+                }
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+            }
+            
+            // Draw individual nodes
+            ctx.fillStyle = blobColor;
+            simulationState.nodes.forEach(node => {
+                ctx.beginPath();
+                ctx.arc(node.x, node.y, 2, 0, 2 * Math.PI);
+                ctx.fill();
+            });
+            
+            // Update UI
+            updateUI();
+        }
+        
+        function updateUI() {
+            document.getElementById('currentDomain').textContent = 
+                `Domain ${simulationState.currentDomain} - ${
+                    simulationState.currentDomain === 1 ? 'At Rest' :
+                    simulationState.currentDomain === 2 ? 'Bouncy' : 'Brittle'
+                }`;
+            document.getElementById('currentDomain').className = `status-indicator domain-${simulationState.currentDomain}`;
+            
+            document.getElementById('impactVel').textContent = 
+                (simulationState.impactVelocity / 100).toFixed(2); // Convert to m/s
+            document.getElementById('strainRate').textContent = 
+                simulationState.strainRate.toFixed(3);
+            document.getElementById('simTime').textContent = 
+                simulationState.time.toFixed(1);
+        }
+        
+        // Event handlers
+        document.getElementById('meshDensity').addEventListener('input', (e) => {
+            params.meshDensity = parseInt(e.target.value);
+            document.getElementById('meshValue').textContent = params.meshDensity;
+        });
+        
+        document.getElementById('dropHeight').addEventListener('input', (e) => {
+            params.dropHeight = parseInt(e.target.value);
+            document.getElementById('heightValue').textContent = params.dropHeight;
+        });
+        
+        document.getElementById('viscosity').addEventListener('input', (e) => {
+            params.viscosity = parseInt(e.target.value);
+            document.getElementById('viscValue').textContent = params.viscosity;
+        });
+        
+        document.getElementById('elasticity').addEventListener('input', (e) => {
+            params.elasticity = parseFloat(e.target.value) * 1e6; // Convert MPa to Pa
+            document.getElementById('elastValue').textContent = (params.elasticity / 1e6).toFixed(1);
+        });
+        
+        function resetSimulation() {
+            simulationState.time = 0;
+            simulationState.isGrounded = false;
+            simulationState.bounceCount = 0;
+            simulationState.currentDomain = 1;
+            simulationState.impactVelocity = 0;
+            simulationState.strainRate = 0;
+            generateMesh();
+        }
+        
+        function togglePause() {
+            params.paused = !params.paused;
+        }
+        
+        // Animation loop
+        function animate() {
+            updatePhysics(params.timeStep);
+            render();
+            requestAnimationFrame(animate);
+        }
+        
+        // Initialize
+        generateMesh();
+        animate();
+        
+        // Auto-reset when blob settles
+        setInterval(() => {
+            const avgVelocity = simulationState.velocities.reduce((sum, vel) => 
+                sum + Math.sqrt(vel.x**2 + vel.y**2), 0) / simulationState.velocities.length;
+            
+            if (avgVelocity < 1 && simulationState.time > 10) {
+                setTimeout(() => resetSimulation(), 3000);
+            }
+        }, 1000);
+    </script>
+</body>
+</html>

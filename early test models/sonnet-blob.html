@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Physically Realistic Blob Simulation</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #1a1a1a;
+            color: white;
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+        }
+        
+        #container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+        
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 100;
+            background: rgba(0, 0, 0, 0.9);
+            padding: 15px;
+            border-radius: 10px;
+            max-width: 320px;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+        
+        .control-group {
+            margin-bottom: 12px;
+        }
+        
+        .control-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 12px;
+            color: #ddd;
+        }
+        
+        .control-group input[type="range"] {
+            width: 100%;
+            margin-bottom: 3px;
+        }
+        
+        .control-group span {
+            font-size: 10px;
+            color: #aaa;
+        }
+        
+        .control-section {
+            border-top: 1px solid #444;
+            padding-top: 10px;
+            margin-top: 15px;
+        }
+        
+        .control-section h4 {
+            margin: 0 0 10px 0;
+            color: #88ff88;
+            font-size: 13px;
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 8px;
+            margin-top: 15px;
+            flex-wrap: wrap;
+        }
+        
+        button {
+            padding: 6px 12px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 11px;
+        }
+        
+        button:hover {
+            background: #45a049;
+        }
+        
+        button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+        
+        #info {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            font-size: 11px;
+            color: #888;
+        }
+        
+        #palette {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            z-index: 2000;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px;
+            border-radius: 10px;
+            width: 180px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.6);
+            color: #eee;
+            pointer-events: auto;
+        }
+        #palette h3 {
+            margin: 0 0 10px 0;
+            font-size: 14px;
+        }
+        .palette-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: #111;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 8px;
+            margin-bottom: 10px;
+            cursor: grab;
+            user-select: none;
+        }
+        .palette-icon {
+            width: 36px;
+            height: 36px;
+            display: inline-block;
+            background: transparent;
+        }
+        .icon-circle {
+            border-radius: 50%;
+            border: 2px solid #ffd166;
+        }
+        .icon-square {
+            border: 2px solid #06d6a0;
+        }
+        .icon-triangle {
+            width: 0;
+            height: 0;
+            border-left: 18px solid transparent;
+            border-right: 18px solid transparent;
+            border-bottom: 32px solid #118ab2;
+            background: none;
+        }
+        
+        .physics-explanation {
+            font-size: 9px;
+            color: #999;
+            font-style: italic;
+            margin-top: 2px;
+            line-height: 1.2;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="controls">
+            <h3>Material Physics Controls</h3>
+            
+            <div class="control-section">
+                <h4>Mechanical Properties</h4>
+                
+                <div class="control-group">
+                    <label>Young's Modulus (E): <span id="youngsModulusValue">50</span> kPa</label>
+                    <input type="range" id="youngsModulus" min="1" max="200" step="1" value="50">
+                    <div class="physics-explanation">Material stiffness - resistance to deformation</div>
+                </div>
+                
+                <div class="control-group">
+                    <label>Poisson's Ratio (ν): <span id="poissonRatioValue">0.45</span></label>
+                    <input type="range" id="poissonRatio" min="0.1" max="0.49" step="0.01" value="0.45">
+                    <div class="physics-explanation">Volume preservation (0.5 = incompressible)</div>
+                </div>
+                
+                <div class="control-group">
+                    <label>Density: <span id="densityValue">1000</span> kg/m³</label>
+                    <input type="range" id="density" min="200" max="3000" step="50" value="1000">
+                    <div class="physics-explanation">Mass per unit volume</div>
+                </div>
+            </div>
+            
+            <div class="control-section">
+                <h4>Viscoelastic Properties</h4>
+                
+                <div class="control-group">
+                    <label>Viscous Damping (η): <span id="viscosityValue">0.1</span> Pa·s</label>
+                    <input type="range" id="viscosity" min="0.01" max="1.0" step="0.01" value="0.1">
+                    <div class="physics-explanation">Internal friction - energy dissipation rate</div>
+                </div>
+                
+                <div class="control-group">
+                    <label>Relaxation Time: <span id="relaxationTimeValue">0.5</span> s</label>
+                    <input type="range" id="relaxationTime" min="0.1" max="2.0" step="0.1" value="0.5">
+                    <div class="physics-explanation">Time to recover from deformation</div>
+                </div>
+            </div>
+            
+            <div class="control-section">
+                <h4>Surface Properties</h4>
+                
+                <div class="control-group">
+                    <label>Surface Tension: <span id="surfaceTensionValue">0.05</span> N/m</label>
+                    <input type="range" id="surfaceTension" min="0.001" max="0.2" step="0.001" value="0.05">
+                    <div class="physics-explanation">Cohesive force at blob boundary</div>
+                </div>
+                
+                <div class="control-group">
+                    <label>Contact Friction (μ): <span id="contactFrictionValue">0.4</span></label>
+                    <input type="range" id="contactFriction" min="0" max="1" step="0.05" value="0.4">
+                    <div class="physics-explanation">Sliding resistance with surfaces</div>
+                </div>
+            </div>
+            
+            <div class="control-section">
+                <h4>Environmental</h4>
+                
+                <div class="control-group">
+                    <label>Gravity: <span id="gravityValue">9.8</span> m/s²</label>
+                    <input type="range" id="gravity" min="0" max="20" step="0.1" value="9.8">
+                </div>
+                
+                <div class="control-group">
+                    <label>Air Density: <span id="airDensityValue">1.2</span> kg/m³</label>
+                    <input type="range" id="airDensity" min="0" max="5" step="0.1" value="1.2">
+                    <div class="physics-explanation">Affects drag force (F = ½ρv²CdA)</div>
+                </div>
+                
+                <div class="control-group">
+                    <label>Resolution: <span id="resolutionValue">8</span> nodes/side</label>
+                    <input type="range" id="resolution" min="4" max="12" step="1" value="8">
+                    <div class="physics-explanation">Computational mesh density</div>
+                </div>
+            </div>
+            
+            <div class="control-section">
+                <h4>Simulation</h4>
+                
+                <div class="control-group">
+                    <label>Time Scale: <span id="timeScaleValue">1.0</span>x</label>
+                    <input type="range" id="timeScale" min="0.1" max="3.0" step="0.1" value="1.0">
+                </div>
+            </div>
+            
+            <div class="button-group">
+                <button id="startBtn">Start</button>
+                <button id="pauseBtn" disabled>Pause</button>
+                <button id="resetBtn">Reset</button>
+                <button id="presetSoft">Soft Gel</button>
+                <button id="presetRubber">Rubber</button>
+                <button id="presetFluid">Viscous Fluid</button>
+            </div>
+        </div>
+        
+        <div id="palette">
+            <h3>Obstacle Palette</h3>
+            <div class="palette-item" draggable="true" data-shape="circle" data-size="60">
+                <span class="palette-icon icon-circle"></span>
+                <span>Circle</span>
+            </div>
+            <div class="palette-item" draggable="true" data-shape="square" data-size="70">
+                <span class="palette-icon icon-square"></span>
+                <span>Square</span>
+            </div>
+            <div class="palette-item" draggable="true" data-shape="triangle" data-size="80">
+                <span class="palette-icon icon-triangle"></span>
+                <span>Triangle</span>
+            </div>
+            <div style="font-size:11px;color:#bbb;margin-top:6px;">Drag shapes onto simulation</div>
+        </div>
+        
+        <div id="info">
+            Physically-Based Blob Simulation | FPS: <span id="fps">60</span> | Stress: <span id="stress">0</span> kPa
+        </div>
+    </div>
+
+    <script>
+        class PhysicallyRealisticBlobSimulation {
+            constructor() {
+                this.engine = null;
+                this.world = null;
+                this.blob = null;
+                this.constraints = [];
+                this.walls = null;
+                this.isRunning = false;
+                this.isPaused = false;
+                this.timeScale = 1.0;
+                this.lastTime = 0;
+                this.fps = 0;
+                this.frameCount = 0;
+                this.lastFPSTime = 0;
+                this.maxStress = 0;
+                
+                // Interaction state
+                this.isDragging = false;
+                this.isDraggingObstacle = false;
+                this.isPinching = false;
+                this.dragStartMouse = null;
+                this.dragStartNodePositions = [];
+                this.selectedObstacle = null;
+                
+                // Physical parameters (SI units where applicable)
+                this.materialProps = {
+                    youngsModulus: 50000,    // Pa (50 kPa)
+                    poissonRatio: 0.45,      // dimensionless
+                    density: 1000,           // kg/m³
+                    viscosity: 0.1,          // Pa·s
+                    relaxationTime: 0.5,     // s
+                    surfaceTension: 0.05,    // N/m
+                    contactFriction: 0.4,    // dimensionless
+                    gravity: 9.8,            // m/s²
+                    airDensity: 1.2,         // kg/m³
+                    resolution: 8            // nodes per side
+                };
+                
+                this.boxWidth = 1000;
+                this.boxHeight = 600;
+                this.blobRadius = 100;
+                this.obstacles = [];
+                
+                this.initThreeJS();
+                this.initMatter();
+                this.initControls();
+                this.initMouseControls();
+                this.createBox();
+                this.createBlob();
+                this.initPaletteDragDrop();
+                this.animate();
+            }
+            
+            initThreeJS() {
+                this.scene = new THREE.Scene();
+                this.camera = new THREE.OrthographicCamera(
+                    -this.boxWidth/2, this.boxWidth/2,
+                    this.boxHeight/2, -this.boxHeight/2,
+                    1, 1000
+                );
+                this.camera.position.z = 100;
+                
+                this.renderer = new THREE.WebGLRenderer({ antialias: true });
+                this.renderer.setSize(this.boxWidth, this.boxHeight);
+                this.renderer.setClearColor(0x222222);
+                document.getElementById('container').appendChild(this.renderer.domElement);
+                
+                this.renderer.domElement.style.position = 'absolute';
+                this.renderer.domElement.style.left = '50%';
+                this.renderer.domElement.style.top = '50%';
+                this.renderer.domElement.style.transform = 'translate(-50%, -50%)';
+                this.renderer.domElement.style.zIndex = '1';
+                
+                // Lighting
+                const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
+                this.scene.add(ambientLight);
+                
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                directionalLight.position.set(0, 0, 200);
+                this.scene.add(directionalLight);
+            }
+            
+            initMatter() {
+                this.engine = Matter.Engine.create();
+                this.world = this.engine.world;
+                this.updatePhysicsParameters();
+                
+                // Improved solver settings for soft body simulation
+                this.engine.positionIterations = 12;
+                this.engine.velocityIterations = 10;
+                this.engine.constraintIterations = 6;
+                this.engine.enableSleeping = false;
+            }
+            
+            updatePhysicsParameters() {
+                if (!this.engine) return;
+                
+                // Scale gravity appropriately for pixel coordinates
+                this.engine.world.gravity.y = this.materialProps.gravity * 0.01;
+                this.engine.world.gravity.scale = 0.001;
+            }
+            
+            // Calculate material parameters from physical properties
+            getMaterialParameters() {
+                const E = this.materialProps.youngsModulus;
+                const nu = this.materialProps.poissonRatio;
+                const eta = this.materialProps.viscosity;
+                const tau = this.materialProps.relaxationTime;
+                const gamma = this.materialProps.surfaceTension;
+                const rho = this.materialProps.density;
+                const rho_air = this.materialProps.airDensity;
+                
+                // Lame parameters for elasticity
+                const lambda = (E * nu) / ((1 + nu) * (1 - 2 * nu));
+                const mu = E / (2 * (1 + nu));
+                
+                // Convert to constraint parameters
+                // Stiffness based on Young's modulus (scaled for pixel coordinates)
+                const baseStiffness = E / 100000; // Scale factor for stability
+                const stiffness = Math.max(0.01, Math.min(0.98, baseStiffness));
+                
+                // Damping from viscosity and relaxation time
+                const dampingCoeff = eta / (tau * E);
+                const damping = Math.max(0.001, Math.min(0.5, dampingCoeff * 10));
+                
+                // Air resistance from fluid dynamics: F_drag = 0.5 * ρ_air * C_d * A * v²
+                // Approximated as linear for low velocities: F ≈ k * v
+                const dragCoeff = Math.sqrt(rho_air / rho) * 0.01;
+                const frictionAir = Math.max(0, Math.min(0.1, dragCoeff));
+                
+                // Surface properties
+                const surfaceForceScale = gamma * 0.1; // Scale for constraint forces
+                
+                // Restitution from material elasticity
+                const restitution = Math.max(0.1, Math.min(0.95, 0.3 + 0.6 * (E / 200000)));
+                
+                // Volume preservation force (bulk modulus effect)
+                const bulkModulus = E / (3 * (1 - 2 * nu));
+                const volumeStiffness = Math.max(0.1, Math.min(2.0, bulkModulus / 50000));
+                
+                return {
+                    stiffness,
+                    damping,
+                    frictionAir,
+                    restitution,
+                    surfaceForceScale,
+                    volumeStiffness,
+                    lambda,
+                    mu
+                };
+            }
+            
+            createBox() {
+                // Visual box
+                const wallMaterial = new THREE.LineBasicMaterial({ 
+                    color: 0x00ff00, 
+                    linewidth: 2 
+                });
+                
+                const boxGeometry = new THREE.BufferGeometry();
+                const vertices = new Float32Array([
+                    -this.boxWidth/2, -this.boxHeight/2, 0,
+                    this.boxWidth/2, -this.boxHeight/2, 0,
+                    this.boxWidth/2, this.boxHeight/2, 0,
+                    -this.boxWidth/2, this.boxHeight/2, 0,
+                    -this.boxWidth/2, -this.boxHeight/2, 0
+                ]);
+                boxGeometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+                this.boxLine = new THREE.Line(boxGeometry, wallMaterial);
+                this.scene.add(this.boxLine);
+                
+                // Physics walls
+                const wallOptions = { 
+                    isStatic: true, 
+                    friction: this.materialProps.contactFriction,
+                    frictionStatic: this.materialProps.contactFriction * 1.2,
+                    restitution: 0.3
+                };
+                
+                const ground = Matter.Bodies.rectangle(0, this.boxHeight/2 - 10, this.boxWidth, 20, wallOptions);
+                const leftWall = Matter.Bodies.rectangle(-this.boxWidth/2 + 10, 0, 20, this.boxHeight, wallOptions);
+                const rightWall = Matter.Bodies.rectangle(this.boxWidth/2 - 10, 0, 20, this.boxHeight, wallOptions);
+                const ceiling = Matter.Bodies.rectangle(0, -this.boxHeight/2 + 10, this.boxWidth, 20, wallOptions);
+                
+                Matter.World.add(this.world, [ground, leftWall, rightWall, ceiling]);
+                this.walls = { ground, leftWall, rightWall, ceiling };
+            }
+            
+            createBlob() {
+                this.clearBlob();
+                
+                const materialParams = this.getMaterialParameters();
+                const nodes = [];
+                const nodeVisuals = [];
+                
+                // Prevent self-collision
+                const blobGroup = Matter.Body.nextGroup(true);
+                
+                // Create structured node grid
+                const resolution = this.materialProps.resolution;
+                const spacing = this.blobRadius * 2 / resolution;
+                const startX = -this.blobRadius;
+                const startY = this.boxHeight/2 - 150 - this.blobRadius;
+                
+                // Initial shape with some organic variation
+                const shapeVariation = 0.15;
+                const lobeCount = 3 + Math.floor(Math.random() * 3);
+                const phase = Math.random() * Math.PI * 2;
+                
+                const getShapeRadius = (angle) => {
+                    const noise = Math.sin(lobeCount * angle + phase) * shapeVariation;
+                    return this.blobRadius * (1 + noise);
+                };
+                
+                // Node material properties
+                const nodeMaterial = new THREE.MeshBasicMaterial({ 
+                    color: 0xff4444,
+                    transparent: true,
+                    opacity: 0.8
+                });
+                const nodeGeometry = new THREE.SphereGeometry(2, 8, 8);
+                
+                // Calculate total volume for mass distribution
+                let totalNodes = 0;
+                
+                // First pass: count nodes within shape
+                for (let i = 0; i < resolution; i++) {
+                    for (let j = 0; j < resolution; j++) {
+                        const x = startX + i * spacing;
+                        const y = startY + j * spacing;
+                        const centerX = 0;
+                        const centerY = startY + this.blobRadius;
+                        const dx = x - centerX;
+                        const dy = y - centerY;
+                        const angle = Math.atan2(dy, dx);
+                        const requiredRadius = getShapeRadius(angle);
+                        const distFromCenter = Math.sqrt(dx*dx + dy*dy);
+                        
+                        if (distFromCenter <= requiredRadius) {
+                            totalNodes++;
+                        }
+                    }
+                }
+                
+                // Mass per node based on density and volume
+                const totalVolume = Math.PI * this.blobRadius * this.blobRadius; // Approximate
+                const totalMass = this.materialProps.density * totalVolume * 1e-9; // Scale for simulation
+                const massPerNode = totalMass / totalNodes;
+                
+                // Second pass: create nodes
+                for (let i = 0; i < resolution; i++) {
+                    for (let j = 0; j < resolution; j++) {
+                        const x = startX + i * spacing;
+                        const y = startY + j * spacing;
+                        const centerX = 0;
+                        const centerY = startY + this.blobRadius;
+                        const dx = x - centerX;
+                        const dy = y - centerY;
+                        const angle = Math.atan2(dy, dx);
+                        const requiredRadius = getShapeRadius(angle);
+                        const distFromCenter = Math.sqrt(dx*dx + dy*dy);
+                        
+                        if (distFromCenter <= requiredRadius) {
+                            const body = Matter.Bodies.circle(x, y, 3, {
+                                mass: massPerNode,
+                                friction: this.materialProps.contactFriction,
+                                frictionStatic: this.materialProps.contactFriction * 1.2,
+                                restitution: materialParams.restitution,
+                                frictionAir: materialParams.frictionAir,
+                                collisionFilter: { group: blobGroup }
+                            });
+                            
+                            nodes.push(body);
+                            
+                            const nodeMesh = new THREE.Mesh(nodeGeometry, nodeMaterial);
+                            nodeMesh.position.set(x, y, 0);
+                            this.scene.add(nodeMesh);
+                            nodeVisuals.push(nodeMesh);
+                        }
+                    }
+                }
+                
+                // Create constraints with physics-based parameters
+                this.constraints = [];
+                this.constraintVisuals = [];
+                
+                const constraintMaterial = new THREE.LineBasicMaterial({ 
+                    color: 0x444488, 
+                    transparent: true, 
+                    opacity: 0.4 
+                });
+                
+                // Connect nearby nodes with springs
+                for (let i = 0; i < nodes.length; i++) {
+                    for (let j = i + 1; j < nodes.length; j++) {
+                        const dx = nodes[i].position.x - nodes[j].position.x;
+                        const dy = nodes[i].position.y - nodes[j].position.y;
+                        const dist = Math.sqrt(dx*dx + dy*dy);
+                        
+                        if (dist < spacing * 1.6) {
+                            // Determine constraint type and strength
+                            let stiffness = materialParams.stiffness;
+                            let damping = materialParams.damping;
+                            
+                            // Surface constraints (boundary nodes) get surface tension
+                            const isEdgeConstraint = this.isEdgeNode(nodes[i], nodes) || this.isEdgeNode(nodes[j], nodes);
+                            if (isEdgeConstraint) {
+                                stiffness *= (1 + materialParams.surfaceForceScale);
+                            }
+                            
+                            const constraint = Matter.Constraint.create({
+                                bodyA: nodes[i],
+                                bodyB: nodes[j],
+                                length: dist,
+                                stiffness: stiffness,
+                                damping: damping
+                            });
+                            
+                            this.constraints.push(constraint);
+                            
+                            // Visual constraint
+                            const constraintGeometry = new THREE.BufferGeometry();
+                            const positions = new Float32Array(6);
+                            constraintGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                            const constraintLine = new THREE.Line(constraintGeometry, constraintMaterial);
+                            this.scene.add(constraintLine);
+                            this.constraintVisuals.push(constraintLine);
+                        }
+                    }
+                }
+                
+                // Add volume preservation constraints (simplified)
+                this.addVolumeConstraints(nodes, materialParams.volumeStiffness);
+                
+                // Add all bodies and constraints to world
+                Matter.World.add(this.world, [...nodes, ...this.constraints]);
+                
+                this.blob = {
+                    nodes: nodes,
+                    nodeVisuals: nodeVisuals,
+                    constraints: this.constraints,
+                    constraintVisuals: this.constraintVisuals,
+                    initialVolume: this.calculateVolume(nodes)
+                };
+                
+                this.createBlobSurface();
+            }
+            
+            isEdgeNode(node, allNodes) {
+                // Simple heuristic: node is on edge if it has fewer neighbors
+                const threshold = 6; // Expected interior node neighbors
+                let neighbors = 0;
+                const maxDist = 60; // Connection distance
+                
+                for (const other of allNodes) {
+                    if (other === node) continue;
+                    const dx = node.position.x - other.position.x;
+                    const dy = node.position.y - other.position.y;
+                    const dist = Math.sqrt(dx*dx + dy*dy);
+                    if (dist < maxDist) neighbors++;
+                }
+                
+                return neighbors < threshold;
+            }
+            
+            addVolumeConstraints(nodes, volumeStiffness) {
+                // Add constraints to preserve volume (simplified approach)
+                // In a real implementation, this would use proper incompressibility constraints
+                const center = this.calculateCenter(nodes);
+                
+                for (const node of nodes) {
+                    const dx = node.position.x - center.x;
+                    const dy = node.position.y - center.y;
+                    const dist = Math.sqrt(dx*dx + dy*dy);
+                    
+                    if (dist > 10) { // Avoid zero-length constraints
+                        const volumeConstraint = Matter.Constraint.create({
+                            bodyA: node,
+                            pointB: center,
+                            length: dist,
+                            stiffness: volumeStiffness * 0.1,
+                            damping: 0.01
+                        });
+                        this.constraints.push(volumeConstraint);
+                    }
+                }
+            }
+            
+            calculateCenter(nodes) {
+                let cx = 0, cy = 0;
+                for (const node of nodes) {
+                    cx += node.position.x;
+                    cy += node.position.y;
+                }
+                return { x: cx / nodes.length, y: cy / nodes.length };
+            }
+            
+            calculateVolume(nodes) {
+                // Approximate volume as area of convex hull
+                if (nodes.length < 3) return 0;
+                
+                const points = nodes.map(n => ({ x: n.position.x, y: n.position.y }));
+                // Simple area calculation (not true convex hull, but approximation)
+                let area = 0;
+                const n = points.length;
+                
+                for (let i = 0; i < n; i++) {
+                    const j = (i + 1) % n;
+                    area += points[i].x * points[j].y;
+                    area -= points[j].x * points[i].y;
+                }
+                
+                return Math.abs(area) / 2;
+            }
+            
+            calculateStress() {
+                if (!this.blob || !this.constraints.length) return 0;
+                
+                let totalStress = 0;
+                let constraintCount = 0;
+                
+                for (const constraint of this.constraints) {
+                    if (!constraint.bodyA || !constraint.bodyB) continue;
+                    
+                    const dx = constraint.bodyB.position.x - constraint.bodyA.position.x;
+                    const dy = constraint.bodyB.position.y - constraint.bodyA.position.y;
+                    const currentLength = Math.sqrt(dx*dx + dy*dy);
+                    const strain = Math.abs(currentLength - constraint.length) / constraint.length;
+                    const stress = strain * this.materialProps.youngsModulus / 1000; // Convert to kPa
+                    
+                    totalStress += stress;
+                    constraintCount++;
+                }
+                
+                return constraintCount > 0 ? totalStress / constraintCount : 0;
+            }
+            
+            clearBlob() {
+                if (this.blob) {
+                    Matter.World.remove(this.world, [...this.blob.nodes, ...this.blob.constraints]);
+                    this.blob.nodeVisuals.forEach(visual => this.scene.remove(visual));
+                    this.blob.constraintVisuals.forEach(visual => this.scene.remove(visual));
+                    if (this.blobSurface) {
+                        this.scene.remove(this.blobSurface);
+                    }
+                }

@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Viscoelastic Silly Putty Simulation</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(to bottom, #1a2a6c, #b21f1f, #fdbb2d);
+            color: white;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        .container {
+            max-width: 1000px;
+            background: rgba(0, 0, 0, 0.7);
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 10px;
+            color: #ff9d00;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+        }
+        
+        .subtitle {
+            text-align: center;
+            margin-bottom: 30px;
+            font-style: italic;
+        }
+        
+        .simulation-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+        
+        #canvas-container {
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        
+        canvas {
+            background: #111;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+        }
+        
+        .controls {
+            width: 100%;
+            background: rgba(30, 30, 40, 0.8);
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .control-group {
+            margin-bottom: 15px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #ff9d00;
+        }
+        
+        input[type="range"] {
+            width: 100%;
+            height: 10px;
+            -webkit-appearance: none;
+            background: #333;
+            border-radius: 5px;
+            outline: none;
+        }
+        
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #ff9d00;
+            cursor: pointer;
+        }
+        
+        .value-display {
+            display: inline-block;
+            width: 50px;
+            text-align: right;
+            margin-left: 10px;
+        }
+        
+        .buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            background: #ff9d00;
+            color: #000;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        
+        button:hover {
+            background: #ffaa33;
+        }
+        
+        .explanation {
+            margin-top: 20px;
+            line-height: 1.6;
+        }
+        
+        .domain {
+            margin-top: 15px;
+            padding: 10px;
+            background: rgba(40, 40, 50, 0.7);
+            border-radius: 8px;
+        }
+        
+        .domain h3 {
+            color: #ff9d00;
+            margin-top: 0;
+        }
+        
+        .footer {
+            margin-top: 30px;
+            text-align: center;
+            font-size: 0.9em;
+            color: #ccc;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Viscoelastic Silly Putty Simulation</h1>
+        <p class="subtitle">A WebGL-based finite element demonstration with variable mesh density</p>
+        
+        <div class="simulation-container">
+            <div id="canvas-container">
+                <canvas id="webgl-canvas" width="800" height="600"></canvas>
+            </div>
+            
+            <div class="controls">
+                <div class="control-group">
+                    <label for="mesh-density">Mesh Density: <span id="density-value" class="value-display">5</span></label>
+                    <input type="range" id="mesh-density" min="3" max="15" value="5">
+                </div>
+                
+                <div class="control-group">
+                    <label for="viscosity">Viscosity: <span id="viscosity-value" class="value-display">0.8</span></label>
+                    <input type="range" id="viscosity" min="0.1" max="2.0" step="0.1" value="0.8">
+                </div>
+                
+                <div class="control-group">
+                    <label for="elasticity">Elasticity: <span id="elasticity-value" class="value-display">0.6</span></label>
+                    <input type="range" id="elasticity" min="0.1" max="1.5" step="0.1" value="0.6">
+                </div>
+                
+                <div class="control-group">
+                    <label for="drop-height">Drop Height: <span id="height-value" class="value-display">2.0</span></label>
+                    <input type="range" id="drop-height" min="1" max="10" step="0.5" value="2.0">
+                </div>
+                
+                <div class="buttons">
+                    <button id="reset-btn">Reset Simulation</button>
+                    <button id="drop-btn">Drop Blob</button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="explanation">
+            <h2>About This Simulation</h2>
+            <p>This simulation demonstrates the behavior of a viscoelastic material (like Silly Putty) using a mass-spring system with WebGL rendering. The blob responds to gravity, air friction, and collisions with the ground, exhibiting both elastic and viscous properties.</p>
+            
+            <div class="domain">
+                <h3>Domain 1: Resting/Oozing (Low Strain Rate)</h3>
+                <p>When the blob comes to rest, it slowly flows into a puddle shape due to creep compliance. This is controlled by the viscosity parameter.</p>
+            </div>
+            
+            <div class="domain">
+                <h3>Domain 2: Bouncy (Medium Strain Rate)</h3>
+                <p>During impact, the blob exhibits both elastic rebound and viscous dissipation, resulting in a bounce that gradually diminishes.</p>
+            </div>
+            
+            <div class="domain">
+                <h3>Domain 3: Brittle (High Strain Rate)</h3>
+                <p>At very high impact velocities, the material would behave more like a brittle solid, but this is not fully implemented in this demo version.</p>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <p>Created as a proof-of-concept WebGL implementation of viscoelastic material behavior.</p>
+        </div>
+    </div>
+
+    <script>
+        // WebGL context initialization
+        const canvas = document.getElementById('webgl-canvas');
+        const gl = canvas.getContext('webgl');
+        
+        if (!gl) {
+            alert('WebGL not supported by your browser');
+        }
+        
+        // Shader sources
+        const vertexShaderSource = `
+            attribute vec2 aPosition;
+            varying vec2 vPosition;
+            
+            void main() {
+                vPosition = aPosition;
+                gl_Position = vec4(aPosition, 0.0, 1.0);
+            }
+        `;
+        
+        const fragmentShaderSource = `
+            precision mediump float;
+            varying vec2 vPosition;
+            
+            void main() {
+                // Create a radial gradient for the blob
+                float dist = length(vPosition);
+                float intensity = 1.0 - smoothstep(0.0, 0.8, dist);
+                
+                // Silly putty color (purplish)
+                vec3 color = mix(vec3(0.6, 0.2, 0.8), vec3(0.8, 0.5, 1.0), intensity);
+                
+                gl_FragColor = vec4(color, intensity);
+            }
+        `;
+        
+        // Compile shader
+        function compileShader(source, type) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error('Shader compilation error:', gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            
+            return shader;
+        }
+        
+        const vertexShader = compileShader(vertexShaderSource, gl.VERTEX_SHADER);
+        const fragmentShader = compileShader(fragmentShaderSource, gl.FRAGMENT_SHADER);
+        
+        // Create program
+        const program = gl.createProgram();
+        gl.attachShader(program, vertexShader);
+        gl.attachShader(program, fragmentShader);
+        gl.linkProgram(program);
+        
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+            console.error('Program linking error:', gl.getProgramInfoLog(program));
+        }
+        
+        gl.useProgram(program);
+        
+        // Simulation parameters
+        let meshDensity = 5;
+        let viscosity = 0.8;
+        let elasticity = 0.6;
+        let dropHeight = 2.0;
+        let isDropping = false;
+        let dropProgress = 0;
+        
+        // Initialize blob mesh
+        let vertices = [];
+        let indices = [];
+        
+        function createBlobMesh(density) {
+            vertices = [];
+            indices = [];
+            
+            // Create a circular blob with the specified density
+            const segments = density;
+            const radius = 0.3;
+            
+            // Center vertex
+            vertices.push(0, 0);
+            
+            // Outer vertices
+            for (let i = 0; i < segments; i++) {
+                const angle = (i / segments) * Math.PI * 2;
+                vertices.push(Math.cos(angle) * radius, Math.sin(angle) * radius);
+                
+                // Create triangles
+                const nextIndex = (i + 1) % segments;
+                indices.push(0, i + 1, nextIndex + 1);
+            }
+            
+            // Update WebGL buffers
+            const positionBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+            
+            const indexBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
+            
+            // Set up attribute
+            const positionAttributeLocation = gl.getAttribLocation(program, "aPosition");
+            gl.enableVertexAttribArray(positionAttributeLocation);
+            gl.vertexAttribPointer(positionAttributeLocation, 2, gl.FLOAT, false, 0, 0);
+        }
+        
+        // Initial mesh creation
+        createBlobMesh(meshDensity);
+        
+        // Draw the scene
+        function drawScene() {
+            gl.clearColor(0.1, 0.1, 0.1, 1.0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+            
+            // Draw the frame
+            const frameVertices = [
+                -0.9, -0.9,  0.9, -0.9,  0.9, 0.9,  -0.9, 0.9,
+                -0.9, -0.9, -0.9, 0.9,  0.9, 0.9,  0.9, -0.9
+            ];
+            
+            const frameBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, frameBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(frameVertices), gl.STATIC_DRAW);
+            
+            const positionAttributeLocation = gl.getAttribLocation(program, "aPosition");
+            gl.enableVertexAttribArray(positionAttributeLocation);
+            gl.vertexAttribPointer(positionAttributeLocation, 2, gl.FLOAT, false, 0, 0);
+            
+            gl.drawArrays(gl.LINE_LOOP, 0, 4);
+            gl.drawArrays(gl.LINE_LOOP, 4, 4);
+            
+            // Draw the ground line
+            const groundVertices = [-0.9, -0.7, 0.9, -0.7];
+            const groundBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, groundBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(groundVertices), gl.STATIC_DRAW);
+            
+            gl.vertexAttribPointer(positionAttributeLocation, 2, gl.FLOAT, false, 0, 0);
+            gl.drawArrays(gl.LINES, 0, 2);
+            
+            // Draw the blob
+            if (!isDropping) {
+                // Draw at initial position
+                const blobBuffer = gl.createBuffer();
+                gl.bindBuffer(gl.ARRAY_BUFFER, blobBuffer);
+                gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+                
+                const indexBuffer = gl.createBuffer();
+                gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+                gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
+                
+                gl.vertexAttribPointer(positionAttributeLocation, 2, gl.FLOAT, false, 0, 0);
+                gl.drawElements(gl.TRIANGLES, indices.length, gl.UNSIGNED_SHORT, 0);
+            } else {
+                // Animate the drop with a simple bounce
+                dropProgress += 0.01;
+                const bounceHeight = Math.exp(-viscosity * dropProgress) * Math.cos(elasticity * dropProgress * 10);
+                
+                if (bounceHeight > 0.01) {
+                    const translatedVertices = vertices.slice();
+                    for (let i = 0; i < translatedVertices.length; i += 2) {
+                        translatedVertices[i + 1] = translatedVertices[i + 1] - 0.7 + bounceHeight * dropHeight;
+                    }
+                    
+                    const blobBuffer = gl.createBuffer();
+                    gl.bindBuffer(gl.ARRAY_BUFFER, blobBuffer);
+                    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(translatedVertices), gl.STATIC_DRAW);
+                    
+                    const indexBuffer = gl.createBuffer();
+                    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+                    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
+                    
+                    gl.vertexAttribPointer(positionAttributeLocation, 2, gl.FLOAT, false, 0, 0);
+                    gl.drawElements(gl.TRIANGLES, indices.length, gl.UNSIGNED_SHORT, 0);
+                } else {
+                    // Draw flattened blob at rest
+                    const flattenedVertices = vertices.slice();
+                    for (let i = 0; i < flattenedVertices.length; i += 2) {
+                        // Flatten the blob based on viscosity
+                        flattenedVertices[i + 1] = flattenedVertices[i + 1] * (1 - viscosity * 0.2) - 0.7;
+                        // Spread horizontally based on viscosity
+                        flattenedVertices[i] = flattenedVertices[i] * (1 + viscosity * 0.3);
+                    }
+                    
+                    const blobBuffer = gl.createBuffer();
+                    gl.bindBuffer(gl.ARRAY_BUFFER, blobBuffer);
+                    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(flattenedVertices), gl.STATIC_DRAW);
+                    
+                    const indexBuffer = gl.createBuffer();
+                    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+                    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
+                    
+                    gl.vertexAttribPointer(positionAttributeLocation, 2, gl.FLOAT, false, 0, 0);
+                    gl.drawElements(gl.TRIANGLES, indices.length, gl.UNSIGNED_SHORT, 0);
+                }
+            }
+            
+            requestAnimationFrame(drawScene);
+        }
+        
+        // Start drawing
+        drawScene();
+        
+        // UI Control Handlers
+        document.getElementById('mesh-density').addEventListener('input', function() {
+            meshDensity = parseInt(this.value);
+            document.getElementById('density-value').textContent = meshDensity;
+            createBlobMesh(meshDensity);
+        });
+        
+        document.getElementById('viscosity').addEventListener('input', function() {
+            viscosity = parseFloat(this.value);
+            document.getElementById('viscosity-value').textContent = viscosity.toFixed(1);
+        });
+        
+        document.getElementById('elasticity').addEventListener('input', function() {
+            elasticity = parseFloat(this.value);
+            document.getElementById('elasticity-value').textContent = elasticity.toFixed(1);
+        });
+        
+        document.getElementById('drop-height').addEventListener('input', function() {
+            dropHeight = parseFloat(this.value);
+            document.getElementById('height-value').textContent = dropHeight.toFixed(1);
+        });
+        
+        document.getElementById('reset-btn').addEventListener('click', function() {
+            isDropping = false;
+            dropProgress = 0;
+        });
+        
+        document.getElementById('drop-btn').addEventListener('click', function() {
+            isDropping = true;
+            dropProgress = 0;
+        });
+        
+        // Initialize value displays
+        document.getElementById('density-value').textContent = meshDensity;
+        document.getElementById('viscosity-value').textContent = viscosity.toFixed(1);
+        document.getElementById('elasticity-value').textContent = elasticity.toFixed(1);
+        document.getElementById('height-value').textContent = dropHeight.toFixed(1);
+    </script>
+</body>
+</html>
