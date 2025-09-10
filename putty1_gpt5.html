@@ -323,7 +323,8 @@ function step(){
   ensureValidMass();
   diag = { maxSdot:0, maxStrain:0, edgesCut:0 };
   // reset forces
-  for(const n of nodes){ n.fx=0; n.fy = params.nodeMass * -params.g; }
+  const gAbs = Math.abs(params.g);
+  for(const n of nodes){ n.fx=0; n.fy = params.nodeMass * -gAbs; }
 
   // Edge forces (1D Burgers along edge)
   const sdotMax = Math.max(2*params.fragSR, 25);
@@ -400,9 +401,8 @@ function step(){
       // normal impulse (inelastic according to restitution)
       if(n.vy < 0){ n.vy = -n.vy * params.rest; }
       // dynamic friction (Coulomb) using normal force ~ weight
-      const vt = n.vx; const N = params.nodeMass * Math.max(0, params.g);
+      const vt = n.vx; const N = params.nodeMass * gAbs;
       const maxJ = params.mu * N * dt; const J = clamp(-vt*params.nodeMass, -maxJ, maxJ); n.vx += J/params.nodeMass;
-    }
     }
     // Side walls (inelastic)
     if(n.x < xLeft){ n.x=xLeft; if(n.vx<0) n.vx *= -0.3; }
