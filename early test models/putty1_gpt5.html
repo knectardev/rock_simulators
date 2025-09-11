@@ -65,7 +65,7 @@
     </div>
     <div class="row"><label>Show debug</label><input id="debug" type="checkbox" checked></div>
     <div class="row"><label>Allow fracture</label><input id="fracture" type="checkbox"></div>
-    <div class="row"><label>Strain constraint</label><input id="constrain" type="checkbox"></div>
+    <div class="row"><label>Strain constraint</label><input id="constrain" type="checkbox" checked></div>
     <div class="legend small">
       <div class="pill">Blue = tensile edges</div>
       <div class="pill">Red = compressive edges</div>
@@ -192,7 +192,7 @@ function ensureValidMass(){
 
 // Positional strain constraint: keep edge length within [1-sClamp, 1+sClamp] * L0
 function constrainStrain(iterations){
-  const sClamp = 0.25; // 25% stretch/compress limit per edge
+  const sClamp = 0.12; // tighter strain window for cohesion
   constrainInfo.applied = 0;
   for(let it=0; it<(iterations|0); it++){
     for(const e of edges){ if(e.cut) continue; const A=nodes[e.a], B=nodes[e.b];
@@ -327,7 +327,7 @@ function step(){
   for(const n of nodes){ n.fx=0; n.fy = params.nodeMass * -gAbs; }
 
   // Edge forces (1D Burgers along edge)
-  const sdotMax = Math.max(2*params.fragSR, 25);
+  const sdotMax = Math.max(1.5*params.fragSR, 20);
   for(const e of edges){ if(e.cut) continue; const A=nodes[e.a], B=nodes[e.b];
     let dx=B.x-A.x, dy=B.y-A.y; const L=Math.hypot(dx,dy)||1e-8; const nx=dx/L, ny=dy/L; // unit
     const vrel = (B.vx-A.vx)*nx + (B.vy-A.vy)*ny; // relative velocity along edge
@@ -370,15 +370,15 @@ function step(){
   }
 
   // Air drag ~ v^2
-  const rho_air = 1.2; const Cd = params.air*0.5; const area_node = (params.R*params.R*Math.PI)/nodes.length; // tame drag a bit
+  const rho_air = 1.2; const Cd = Math.max(0, params.air*0.4); const area_node = (params.R*params.R*Math.PI)/nodes.length; // reduce drag influence for gravity
   for(const n of nodes){ const v2 = n.vx*n.vx + n.vy*n.vy; const v = Math.sqrt(v2); if(v>1e-5){ const drag = 0.5*rho_air*Cd*area_node*v2; n.fx += -drag*(n.vx/v); n.fy += -drag*(n.vy/v); } }
   // Buoyancy (optional): push up by displaced air; very small so blob still falls
   const buoyancy = 0.0; // set to >0 to enable
   if(buoyancy>0){ const Fb = buoyancy * params.nodeMass * params.g; for(const n of nodes){ n.fy += Fb; } }
 
   // Integrate
-  const damp = 0.999; // lighter damping so gravity wins
-  const vmax = 10.0; // allow falling speeds while still capping spikes
+  const damp = 0.998; // modest damping
+  const vmax = 7.0; // cap ejections
   for(const n of nodes){
     n.vx = (n.vx + (n.fx/params.nodeMass)*dt)*damp;
     n.vy = (n.vy + (n.fy/params.nodeMass)*dt)*damp;
@@ -410,7 +410,7 @@ function step(){
   }
 
   // Optional positional constraint pass to prevent disassembly
-  if(params.useConstraint){ constrainStrain(2); }
+  if(params.useConstraint){ constrainStrain(3); }
 
   // If any edges were cut, rebuild fragments (affects nothing yet but future logic can vary mass props)
   // (We keep mass per node constant; fragment behavior emerges from graph disconnects)
@@ -433,9 +433,10 @@ function render(){
       verts.push(A.x, A.y, 1,1,1,  B.x,B.y, 1,1,1,  C.x,C.y, 1,1,1);
     }
   }
-  // edges overlay colored by sign of (Fk+Fm)
-  for(const e of edges){ if(e.cut) continue; const A=nodes[e.a], B=nodes[e.b]; const s = e.Fk+e.Fm; const col = s>=0? [0.1,0.6,1.0]:[1.0,0.25,0.25];
-    verts.push(A.x, A.y, ...col,  B.x,B.y, ...col);
+  // edges overlay (single neutral color to avoid double-tone noise)
+  const edgeCol = [0.3,0.7,1.0];
+  for(const e of edges){ if(e.cut) continue; const A=nodes[e.a], B=nodes[e.b];
+    verts.push(A.x, A.y, ...edgeCol,  B.x,B.y, ...edgeCol);
   }
   // Debug frame rectangle and crosshair at origin (append after edges)
   if(debugOn){
@@ -473,8 +474,7 @@ function loop(ts){
   // Adaptive substeps based on max strain-rate from previous step
   const sdot = diag.maxSdot || 0;
   const sRef = Math.max(10, params.fragSR);
-  // ensure at least 2 substeps for smoother ground interaction
-  const substeps = clamp(Math.ceil(sdot/sRef), 2, 8);
+  const substeps = clamp(Math.ceil(sdot/sRef), 2, 6);
   const oldDt = dt; dt = dtBase / substeps; // smaller dt per substep
   for(let i=0;i<substeps;i++) step();
   dt = oldDt; // restore

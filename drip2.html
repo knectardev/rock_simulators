@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <script src="https://cdn.jsdelivr.net/npm/p5@1.11.10/lib/p5.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Drip</title>
+    <meta charset="utf-8" />
+
+  </head>
+  <body>
+    <main>
+    </main>
+    <script>
+const CANVAS_SIZE = 800;
+
+let num_points = 60;
+let thickness = CANVAS_SIZE / 40;
+let inner_radius = CANVAS_SIZE / 5;
+let outer_radius = inner_radius + thickness;
+
+let points = [];
+let springs = [];
+let obstacles = [];
+let draggingObstacle = null;
+let dragOffsetX = 0;
+let dragOffsetY = 0;
+let draggingBlob = false;
+let draggedPointIndex = -1;
+const MOUSE_SPRING_K = 6000;
+const MOUSE_SPRING_DAMP = 100;
+const MOUSE_MAX_FORCE = 20000;
+
+const FRAME = 60;
+const RATE = 1 / FRAME;
+const BASE_GRAVITY = 50; // baseline gravity acceleration
+const BACKGROUND_BLUE = 222; // fixed blue channel for background
+const OBSTACLE_COUNT = 6; // target number of obstacles kept in play (2x frequency)
+const OUTER_RIM_K = 20000;
+const INNER_SPOKE_K = 400;
+let BLOB_FILL_GRAY = 0; // grayscale value used for blob fills
+
+// Symmetry / visualization controls
+let ADD_RANDOM_CROSS_SPRINGS = false; // true = more tangled chords, false = cleaner symmetry
+let DRAW_ALL_INTERNAL_SPRINGS = false; // true = draw every spring, false = mostly rim
+let DRAW_CENTER_SPRINGS = false; // draw spokes to center if true
+const HUB_RADIUS = 20; // visual hub radius in pixels
+
+// Stabilization controls to discourage self-wrapping
+let PRESSURE_K = 0.005; // area restoring coefficient (safer)
+let SELF_REPEL_STRENGTH = 15000; // short-range rim repulsion (safer)
+let SELF_REPEL_RADIUS = thickness * 1.6; // slightly larger minimum separation
+let restOuterArea = 0; // computed at setup
+let BENDING_K = 150; // rim bending stiffness
+let BEND_SPRING_K = 800; // bend springs between every second outer node
+let VISC_BEND_COEF = 0.25; // velocity smoother coefficient
+// Safety clamps
+let MAX_PRESSURE_FORCE = 2500;
+let MAX_EXTRA_FORCE = 6000; // for repulsion and bending contributions
+
+// UI sliders for background color
+let rSlider, vertexSlider, gravitySlider, fillColorSlider;
+// UI checkboxes for visibility
+let fillCheckbox, rimCheckbox, wireCheckbox, solidCheckbox;
+// Base vertices for scaling
+let BASE_NUM_POINTS;
+
+function setup() {
+	frameRate(FRAME);
+	createCanvas(1000, 800);
+
+	// Inline sliders at upper-left of canvas
+	textSize(15);
+	rSlider = createSlider(0, 255, 255);
+	rSlider.position(20, 20);
+	// Vertex count slider (centered at 1x): value in [-1,1] mapped to factor 2^v => [0.5,2]
+	vertexSlider = createSlider(-1, 1, 0, 0.01);
+	vertexSlider.position(20, 50);
+	// Gravity scale slider: 0.5x .. 2x (center at 1.0)
+	gravitySlider = createSlider(0.5, 5.0, 1.0, 0.01);
+	gravitySlider.position(20, 80);
+	// Blob fill color slider (grayscale 0..255)
+	fillColorSlider = createSlider(0, 255, 0, 1);
+	fillColorSlider.position(20, 210);
+
+	// Checkboxes (cumulative)
+	fillCheckbox = createCheckbox('Display blob fill', true);
+	fillCheckbox.position(20, 110);
+	rimCheckbox = createCheckbox('Display blob border rim', true);
+	rimCheckbox.position(20, 135);
+	wireCheckbox = createCheckbox('Display blob wire-frame', false);
+	wireCheckbox.position(20, 160);
+	solidCheckbox = createCheckbox('Display blob solid interior', false);
+	solidCheckbox.position(20, 185);
+	
+	// Build initial blob geometry and springs
+	BASE_NUM_POINTS = num_points;
+	initializeBlob(num_points);
+	
+	if (ADD_RANDOM_CROSS_SPRINGS) {
+		for (var i = 0; i < 100; i++) {
+			let n1 = Math.floor(2 * num_points * Math.random());
+			let n2 = Math.floor(2 * num_points * Math.random());
+			if (n1!= n2) {
+				springs.push(new Spring(points[n1], points[n2], INNER_SPOKE_K));
+			}
+		}
+	}
+
+	// Initialize obstacles to match prior hardcoded circles
+	obstacles = [
+		new ObstacleCircle(CANVAS_SIZE/3, CANVAS_SIZE, CANVAS_SIZE/8),
+		new ObstacleCircle(3*CANVAS_SIZE/3, CANVAS_SIZE, CANVAS_SIZE/16),
+		new ObstacleCircle(CANVAS_SIZE*3.5/4, CANVAS_SIZE*2/3, CANVAS_SIZE/20)
+	];
+
+	// Compute rest area of the outer rim polygon
+	restOuterArea = computeOuterArea();
+}
+
+function draw() {
+	const r = rSlider ? rSlider.value() : 255;
+	// Vertex factor from slider ([-1,1] -> [0.5,2]) and rebuild if changed
+	const vertFactor = pow(2, vertexSlider ? vertexSlider.value() : 0);
+	const targetVerts = max(4, Math.round(BASE_NUM_POINTS * vertFactor));
+	if (targetVerts !== num_points) {
+		initializeBlob(targetVerts);
+		restOuterArea = computeOuterArea();
+		draggingBlob = false;
+		draggedPointIndex = -1;
+	}
+	const g = 11;
+	const gravScale = gravitySlider ? gravitySlider.value() : 1;
+    background(r, g, BACKGROUND_BLUE);
+	// Update current blob fill gray for rendering functions
+	BLOB_FILL_GRAY = fillColorSlider ? fillColorSlider.value() : 0;
+
+	updatePhysics();
+	// Apply constant vertical scroll based solely on gravity (decoupled from collisions)
+	applyGlobalScroll();
+	// Recycle obstacles that left the top and spawn new ones from below
+	recycleObstacles();
+	drawObjects();
+
+	// Labels next to sliders
+	push();
+	noStroke();
+	fill(0);
+	text('red', rSlider.x * 2 + rSlider.width, 35);
+	text('vertices ' + num_points, vertexSlider.x * 2 + vertexSlider.width, 65);
+	text('gravity ' + gravScale.toFixed(2) + 'x', gravitySlider.x * 2 + gravitySlider.width, 95);
+	text('fill color', fillColorSlider.x * 2 + fillColorSlider.width, 225);
+	pop();
+}
+
+function pointDistance(point_1, point_2) {
+	return sqrt(pow(point_1.x - point_2.x, 2) + pow(point_1.y - point_2.y, 2));
+}
+
+class Point {
+	constructor(x, y) {
+		this.ax = 0;
+		this.ay = 0;
+		this.vx = 0;
+		this.vy = 0;
+		this.x = x;
+		this.y = y;
+	}
+}
+
+class Spring {
+	constructor(point_1, point_2, k) {
+		this.point_1 = point_1;
+		this.point_2 = point_2;
+		this.mean = pointDistance(point_1, point_2);
+		this.k = k;
+	}
+	
+	addAcceleration() {
+		let l = pointDistance(this.point_1, this.point_2);
+		let delta_l = l - this.mean;
+		let a = -this.k * delta_l / this.mean;
+		
+		let ax = (this.point_1.x - this.point_2.x) / l * a;
+		let ay = (this.point_1.y - this.point_2.y) / l * a;
+		
+		this.point_1.ax += ax;
+		this.point_1.ay += ay;
+		
+		this.point_2.ax -= ax;
+		this.point_2.ay -= ay;
+		
+		//console.log(ax, ay);
+	}
+}
+
+class ObstacleCircle {
+	constructor(x, y, r) {
+		this.x = x;
+		this.y = y;
+		this.r = r;
+	}
+
+	distance(p) {
+		return sqrt(pow(p[0]-this.x,2)+pow(p[1]-this.y,2)) - this.r;
+	}
+
+	draw() {
+		push();
+		stroke(0);
+		fill(255);
+		circle(this.x, this.y, 2 * this.r);
+		pop();
+	}
+
+	contains(px, py) {
+		return sqrt(pow(px - this.x, 2) + pow(py - this.y, 2)) <= this.r;
+	}
+}
+
+function normalizeVec2(p) {
+	let m = sqrt(p[0] * p[0] + p[1] * p[1]);
+	return [p[0] / m, p[1] / m];
+}
+
+function getNorm(p) {
+	let epsilon = 0.001;
+	let v = sdf(p);
+	return normalizeVec2([sdf([p[0]+epsilon,p[1]])-v,sdf([p[0],p[1]+epsilon])-v]);
+}
+
+function sdf_force(p) {
+	let norm = getNorm(p);
+	let factor = min(exp(30 * -sdf(p)), 1000);
+	return [factor * norm[0], factor * norm[1]];
+}
+
+function updatePhysics() {
+	// Reset point acceleration
+	for (var i = 0; i < points.length; i++) {
+		points[i].ax = 0;
+		// gravity scaled by slider (0.5x..2x around BASE_GRAVITY)
+		let gscale = gravitySlider ? gravitySlider.value() : 1;
+		points[i].ay = BASE_GRAVITY * gscale;
+		
+		let sdf_a = sdf_force([points[i].x, points[i].y]);
+		points[i].ax += sdf_a[0];
+		points[i].ay += sdf_a[1];
+		/*
+		points[i].ax = 0;
+		points[i].ay = 20;
+		if (points[i].y < 0) {
+			points[i].ay -= 1000 * points[i].y;
+		}
+		
+		if (points[i].y > size) {
+			points[i].ay -= 1000 * (points[i].y - size);
+		}
+		*/
+	}
+	
+	// Cycle through springs and add to acceleration
+	for (var i = 0; i < springs.length; i++) {
+		springs[i].addAcceleration();
+	}
+
+	// Apply pressure and self-repulsion on the rim to discourage self-wrapping
+	applyPressureForces();
+	applyRimSelfRepulsion();
+	applyRimBending();
+	applyRimVelocitySmoothing();
+
+	// Apply mouse spring to dragged blob point for physically-based dragging with inertia
+	if (draggingBlob && draggedPointIndex >= 0) {
+		let p = points[draggedPointIndex];
+		let dx = mouseX - p.x;
+		let dy = mouseY - p.y;
+		let fx = MOUSE_SPRING_K * dx - MOUSE_SPRING_DAMP * p.vx;
+		let fy = MOUSE_SPRING_K * dy - MOUSE_SPRING_DAMP * p.vy;
+		// Clamp force to avoid instability
+		let fmag = sqrt(fx*fx + fy*fy);
+		if (fmag > MOUSE_MAX_FORCE) {
+			let scale = MOUSE_MAX_FORCE / (fmag + 1e-6);
+			fx *= scale;
+			fy *= scale;
+		}
+		p.ax += fx;
+		p.ay += fy;
+	}
+	
+	// Update position and velocity
+	for (var i = 0; i < points.length; i++) {
+		let damp = 1;
+		points[i].vx += points[i].ax * RATE;
+		points[i].vy += points[i].ay * RATE;
+		points[i].vx *= exp(damp * -RATE);
+		points[i].vy *= exp(damp * -RATE);
+		points[i].x += points[i].vx * RATE;
+		points[i].y += points[i].vy * RATE;
+	}
+}
+
+function drawObjects() {
+	const showFill = fillCheckbox ? fillCheckbox.checked() : true;
+	const showRim = rimCheckbox ? rimCheckbox.checked() : true;
+	const showWire = wireCheckbox ? wireCheckbox.checked() : false;
+	const showSolid = solidCheckbox ? solidCheckbox.checked() : false;
+
+	// Solid interior first so rims/wires render on top if enabled
+	if (showSolid) {
+		drawSolidFill();
+	}
+
+	// Fill the rim band
+	if (showFill) {
+		drawRimFill();
+	}
+
+	// Wireframe (all springs)
+	if (showWire) {
+		let centre = points[points.length - 1];
+		stroke(0);
+		for (var i = 0; i < springs.length; i++) {
+			let p1 = springs[i].point_1;
+			let p2 = springs[i].point_2;
+			if (p1 === centre || p2 === centre) {
+				let other = (p1 === centre) ? p2 : p1;
+				drawSpokeToHub(other.x, other.y, centre.x, centre.y);
+			} else {
+				line(p1.x, p1.y, p2.x, p2.y);
+			}
+		}
+		// Optional node dots for clarity
+		for (var k = 0; k < points.length; k++) {
+			circle(points[k].x, points[k].y, 4);
+		}
+		// Hub disk for continuity
+		drawHub();
+	}
+
+	// Border rim (outer ring only)
+	if (showRim) {
+		stroke(0);
+		for (var j = 0; j < num_points; j++) {
+			let a = points[2 * j + 1];
+			let b = points[(2 * ((j + 1) % num_points)) + 1];
+			line(a.x, a.y, b.x, b.y);
+			if (DRAW_CENTER_SPRINGS) {
+				let centre2 = points[points.length - 1];
+				drawSpokeToHub(a.x, a.y, centre2.x, centre2.y);
+			}
+		}
+		if (DRAW_CENTER_SPRINGS) {
+			drawHub();
+		}
+	}
+	// Draw obstacles
+	for (var i = 0; i < obstacles.length; i++) {
+		obstacles[i].draw();
+	}
+}
+
+function drawRimFill() {
+	push();
+	noStroke();
+	fill(BLOB_FILL_GRAY, BLOB_FILL_GRAY, BLOB_FILL_GRAY, 128);
+	beginShape(TRIANGLE_STRIP);
+	// Build a triangle strip alternating outer/inner vertices, wrap around to close
+	for (var i = 0; i <= num_points; i++) {
+		let idx = i % num_points;
+		let o = points[2 * idx + 1];
+		let inn = points[2 * idx];
+		vertex(o.x, o.y);
+		vertex(inn.x, inn.y);
+	}
+	endShape(CLOSE);
+	pop();
+}
+
+// Solid fill of the entire interior bounded by the outer rim
+function drawSolidFill() {
+	push();
+	noStroke();
+	fill(BLOB_FILL_GRAY);
+	beginShape();
+	for (var i = 0; i < num_points; i++) {
+		let o = points[2 * i + 1];
+		vertex(o.x, o.y);
+	}
+	endShape(CLOSE);
+	pop();
+}
+
+function drawSpokeToHub(x1, y1, cx, cy) {
+	let dx = cx - x1;
+	let dy = cy - y1;
+	let len = sqrt(dx * dx + dy * dy);
+	if (len < 1e-6) {
+		return;
+	}
+	let ux = dx / len;
+	let uy = dy / len;
+	let hx = cx - ux * HUB_RADIUS;
+	let hy = cy - uy * HUB_RADIUS;
+	line(x1, y1, hx, hy);
+}
+
+function drawHub() {
+	push();
+	noStroke();
+	fill(0, 200);
+	let c = points[points.length - 1];
+	circle(c.x, c.y, HUB_RADIUS * 2);
+	pop();
+}
+
+// Toggle internal cross-section lines with the "i" key; toggle center spokes with "c"
+function keyPressed() {
+	if (key === 'i' || key === 'I') {
+		DRAW_ALL_INTERNAL_SPRINGS = !DRAW_ALL_INTERNAL_SPRINGS;
+	}
+	if (key === 'c' || key === 'C') {
+		DRAW_CENTER_SPRINGS = !DRAW_CENTER_SPRINGS;
+	}
+}
+
+function sdf(p) {
+	// Combine distances from all obstacles
+	if (obstacles.length === 0) {
+		return 1e9; // no obstacles
+	}
+	let d = obstacles[0].distance(p);
+	for (var i = 1; i < obstacles.length; i++) {
+		d = sdfCombine(d, obstacles[i].distance(p));
+	}
+	return d;
+}
+
+function sdfCombine(d1, d2) {
+	if (d1 < 0 && d2 < 0){
+		return max(d1, d2);
+	} else {
+		return min(d1, d2);
+	}
+}
+
+function sdfCircle(p, o, r) {
+	return sqrt(pow(p[0]-o[0],2)+pow(p[1]-o[1],2)) - r;
+}
+
+// Mouse interactions for dragging obstacles or the blob via a mouse spring
+function mousePressed() {
+	for (var i = obstacles.length - 1; i >= 0; i--) {
+		if (obstacles[i].contains(mouseX, mouseY)) {
+			draggingObstacle = obstacles[i];
+			dragOffsetX = mouseX - draggingObstacle.x;
+			dragOffsetY = mouseY - draggingObstacle.y;
+			break;
+		}
+	}
+
+	// If not grabbing an obstacle, try to grab the nearest blob point (avoid the centre point)
+	if (!draggingObstacle) {
+		let minDist2 = 1e18;
+		let minIdx = -1;
+		for (var i = 0; i < points.length - 1; i++) { // exclude centre (last point)
+			let dx = mouseX - points[i].x;
+			let dy = mouseY - points[i].y;
+			let d2 = dx*dx + dy*dy;
+			if (d2 < minDist2) {
+				minDist2 = d2;
+				minIdx = i;
+			}
+		}
+		if (minIdx >= 0 && sqrt(minDist2) <= outer_radius * 1.5) {
+			draggingBlob = true;
+			draggedPointIndex = minIdx;
+		}
+	}
+}
+
+function mouseDragged() {
+	if (draggingObstacle) {
+		draggingObstacle.x = mouseX - dragOffsetX;
+		draggingObstacle.y = mouseY - dragOffsetY;
+	}
+}
+
+function mouseReleased() {
+	draggingObstacle = null;
+	draggingBlob = false;
+	draggedPointIndex = -1;
+}
+
+// Translate both blob and obstacles upward at a constant rate derived from gravity.
+// This creates the illusion of endless falling and is fully decoupled from collisions.
+function applyGlobalScroll() {
+	let gscale = gravitySlider ? gravitySlider.value() : 1;
+	let dy = -BASE_GRAVITY * gscale * RATE; // negative => move up (obstacles rise)
+	for (var i = 0; i < points.length; i++) {
+		points[i].y += dy;
+	}
+	for (var j = 0; j < obstacles.length; j++) {
+		obstacles[j].y += dy;
+	}
+}
+
+// Spawn a new obstacle somewhere below the viewport with random radius and x-position
+function spawnObstacleBelow() {
+	let rmin = CANVAS_SIZE / 24; // half previous min
+	let rmax = CANVAS_SIZE / 6;  // half previous max
+	let rr = random(rmin, rmax);
+	let x = random(CANVAS_SIZE * 0.1, CANVAS_SIZE * 0.9);
+	let y = height + rr + random(CANVAS_SIZE * 0.1, CANVAS_SIZE * 0.6);
+	return new ObstacleCircle(x, y, rr);
+}
+
+// Remove obstacles fully above the frame and replenish from below to keep a steady stream
+function recycleObstacles() {
+	// Remove any that have moved off the top
+	for (var i = obstacles.length - 1; i >= 0; i--) {
+		if (obstacles[i].y + obstacles[i].r < 0) {
+			obstacles.splice(i, 1);
+		}
+	}
+	// Maintain at least OBSTACLE_COUNT obstacles
+	while (obstacles.length < OBSTACLE_COUNT) {
+		obstacles.push(spawnObstacleBelow());
+	}
+}
+
+// Compute signed area of outer rim polygon
+function computeOuterArea() {
+	let area = 0;
+	for (var i = 0; i < num_points; i++) {
+		let a = points[2 * i + 1];
+		let b = points[(2 * ((i + 1) % num_points)) + 1];
+		area += a.x * b.y - b.x * a.y;
+	}
+	return 0.5 * area;
+}
+
+// Apply pressure forces proportional to area deviation to preserve shape area
+function applyPressureForces() {
+	let area = computeOuterArea();
+	if (restOuterArea === 0) return;
+	let rel = (restOuterArea - area) / restOuterArea;
+	let pressure = PRESSURE_K * rel; // positive when area shrinks
+	if (pressure === 0) return;
+
+	// Determine outward normal orientation
+	let outwardSign = (area > 0) ? 1 : -1; // CCW => outward is right normal
+
+	for (var i = 0; i < num_points; i++) {
+		let a = points[2 * i + 1];
+		let b = points[(2 * ((i + 1) % num_points)) + 1];
+		let ex = b.x - a.x;
+		let ey = b.y - a.y;
+		let len = sqrt(ex*ex + ey*ey) + 1e-6;
+		// Right normal for CCW is (dy, -dx)
+		let nx = outwardSign * (ey / len);
+		let ny = outwardSign * (-ex / len);
+		let f = pressure * len; // distribute along edge length
+		// clamp
+		let mag = min(abs(f), MAX_PRESSURE_FORCE);
+		let fx = mag * Math.sign(f) * nx;
+		let fy = mag * Math.sign(f) * ny;
+		a.ax += fx * 0.5;
+		a.ay += fy * 0.5;
+		b.ax += fx * 0.5;
+		b.ay += fy * 0.5;
+	}
+}
+
+// Repel non-adjacent outer rim points that get too close (soft minimum thickness)
+function applyRimSelfRepulsion() {
+	for (var i = 0; i < num_points; i++) {
+		let ai = 2 * i + 1;
+		let a = points[ai];
+		for (var j = i + 2; j < num_points; j++) { // skip immediate neighbors to avoid fighting the rim springs
+			// also skip pair that closes the loop (i and i-1)
+			if ((i === 0 && j === num_points - 1)) continue;
+			let bi = 2 * j + 1;
+			let b = points[bi];
+			let dx = b.x - a.x;
+			let dy = b.y - a.y;
+			let d2 = dx*dx + dy*dy;
+			let r = SELF_REPEL_RADIUS;
+			if (d2 < r*r) {
+				let d = sqrt(d2) + 1e-6;
+				let ux = dx / d;
+				let uy = dy / d;
+				// Soft repulsion grows as they overlap more
+				let overlap = 1 - (d / r);
+				let mag = SELF_REPEL_STRENGTH * overlap;
+				// clamp repulsion
+				mag = min(mag, MAX_EXTRA_FORCE);
+				let fx = mag * ux;
+				let fy = mag * uy;
+				// Push them apart equally
+				a.ax -= fx;
+				a.ay -= fy;
+				b.ax += fx;
+				b.ay += fy;
+			}
+		}
+	}
+}
+
+// Rim bending stiffness: pull each outer point toward average of neighbors
+function applyRimBending() {
+	for (var i = 0; i < num_points; i++) {
+		let prev = (i - 1 + num_points) % num_points;
+		let next = (i + 1) % num_points;
+		let pPrev = points[2 * prev + 1];
+		let pCurr = points[2 * i + 1];
+		let pNext = points[2 * next + 1];
+		let lapx = pPrev.x + pNext.x - 2 * pCurr.x;
+		let lapy = pPrev.y + pNext.y - 2 * pCurr.y;
+		let bx = BENDING_K * lapx;
+		let by = BENDING_K * lapy;
+		// clamp bending force
+		let bmag = sqrt(bx*bx + by*by);
+		if (bmag > MAX_EXTRA_FORCE) {
+			let s = MAX_EXTRA_FORCE / (bmag + 1e-6);
+			bx *= s;
+			by *= s;
+		}
+		pCurr.ax += bx;
+		pCurr.ay += by;
+	}
+}
+
+// Viscous velocity smoothing along the rim to damp sharp creasing
+function applyRimVelocitySmoothing() {
+	for (var i = 0; i < num_points; i++) {
+		let prev = (i - 1 + num_points) % num_points;
+		let next = (i + 1) % num_points;
+		let pPrev = points[2 * prev + 1];
+		let pCurr = points[2 * i + 1];
+		let pNext = points[2 * next + 1];
+		let vLapx = pPrev.vx + pNext.vx - 2 * pCurr.vx;
+		let vLapy = pPrev.vy + pNext.vy - 2 * pCurr.vy;
+		pCurr.vx += VISC_BEND_COEF * vLapx * RATE;
+		pCurr.vy += VISC_BEND_COEF * vLapy * RATE;
+	}
+}
+
+// Rebuild blob points and springs with a given outer-rim vertex count
+function initializeBlob(newNumPoints) {
+	points = [];
+	springs = [];
+	num_points = newNumPoints;
+	// Points
+	for (var i = 0; i < num_points; i++) {
+		points.push(new Point(CANVAS_SIZE/2 + inner_radius * cos(2 * PI * i / num_points), CANVAS_SIZE/2 + inner_radius * sin(2 * PI * i / num_points)));
+		points.push(new Point(CANVAS_SIZE/2 + outer_radius * cos(2 * PI * i / num_points), CANVAS_SIZE/2 + outer_radius * sin(2 * PI * i / num_points)));
+	}
+	points.push(new Point(CANVAS_SIZE/2, CANVAS_SIZE/2));
+	let centre = points[points.length - 1];
+	// Springs
+	for (var i = 0; i < num_points; i++) {
+		springs.push(new Spring(points[2 * i], points[2 * i + 1], OUTER_RIM_K));
+		springs.push(new Spring(points[2 * i + 1], points[(2 * i + 2) % (2 * num_points)], OUTER_RIM_K));
+		springs.push(new Spring(points[2 * i], points[(2 * i + 3) % (2 * num_points)], OUTER_RIM_K));
+		springs.push(new Spring(points[2 * i], points[(2 * i + 2) % (2 * num_points)], OUTER_RIM_K));
+		springs.push(new Spring(points[2 * i + 1], points[(2 * i + 3) % (2 * num_points)], OUTER_RIM_K));
+		// Bend springs on outer rim
+		springs.push(new Spring(
+			points[2 * i + 1],
+			points[(2 * ((i + 2) % num_points)) + 1],
+			BEND_SPRING_K
+		));
+		// Spokes to centre
+		springs.push(new Spring(points[2 * i], centre, INNER_SPOKE_K));
+		springs.push(new Spring(points[2 * i + 1], centre, INNER_SPOKE_K));
+	}
+	if (ADD_RANDOM_CROSS_SPRINGS) {
+		for (var r = 0; r < 100; r++) {
+			let n1 = Math.floor(2 * num_points * Math.random());
+			let n2 = Math.floor(2 * num_points * Math.random());
+			if (n1 != n2) {
+				springs.push(new Spring(points[n1], points[n2], INNER_SPOKE_K));
+			}
+		}
+	}
+}
+
+    </script>
+  </body>
+</html>

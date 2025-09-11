@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verlet Physics Blob Demo</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+            background: #f0f0f0;
+        }
+        
+        #container {
+            display: flex;
+            gap: 20px;
+            align-items: flex-start;
+        }
+        
+        #canvas {
+            border: 2px solid #333;
+            background: white;
+            cursor: pointer;
+        }
+        
+        #controls {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            min-width: 250px;
+        }
+        
+        .control-group {
+            margin-bottom: 15px;
+        }
+        
+        .control-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #333;
+        }
+        
+        .control-group input[type="range"] {
+            width: 100%;
+            margin-bottom: 5px;
+        }
+        
+        .control-group .value {
+            font-size: 12px;
+            color: #666;
+            text-align: center;
+        }
+        
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 10px;
+        }
+        
+        button:hover {
+            background: #45a049;
+        }
+        
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+        }
+        
+        .instructions {
+            background: #e7f3ff;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <h1>Verlet Physics Blob Demo</h1>
+    
+    <div id="container">
+        <canvas id="canvas" width="600" height="400"></canvas>
+        
+        <div id="controls">
+            <div class="instructions">
+                <strong>Instructions:</strong><br>
+                • Click and drag to throw the blob<br>
+                • Adjust sliders to change physics<br>
+                • Use "Reset Blob" to create a new blob
+            </div>
+            
+            <div class="control-group">
+                <label for="gravity">Gravity Strength</label>
+                <input type="range" id="gravity" min="0" max="2" step="0.1" value="0.5">
+                <div class="value" id="gravityValue">0.5</div>
+            </div>
+            
+            <div class="control-group">
+                <label for="gooiness">Gooiness (1=Melty, 10=Bouncy)</label>
+                <input type="range" id="gooiness" min="1" max="10" step="0.5" value="5">
+                <div class="value" id="gooInessValue">5</div>
+            </div>
+            
+            <div class="control-group">
+                <label for="size">Blob Size</label>
+                <input type="range" id="size" min="20" max="80" step="5" value="40">
+                <div class="value" id="sizeValue">40</div>
+            </div>
+            
+            <div class="control-group">
+                <label for="density">Vertex Density</label>
+                <input type="range" id="density" min="8" max="24" step="2" value="16">
+                <div class="value" id="densityValue">16</div>
+            </div>
+            
+            <button onclick="resetBlob()">Reset Blob</button>
+        </div>
+    </div>
+
+    <script>
+        class Vec2 {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+            }
+            
+            add(v) {
+                return new Vec2(this.x + v.x, this.y + v.y);
+            }
+            
+            sub(v) {
+                return new Vec2(this.x - v.x, this.y - v.y);
+            }
+            
+            mult(s) {
+                return new Vec2(this.x * s, this.y * s);
+            }
+            
+            length() {
+                return Math.sqrt(this.x * this.x + this.y * this.y);
+            }
+            
+            normalize() {
+                let len = this.length();
+                if (len > 0) {
+                    return new Vec2(this.x / len, this.y / len);
+                }
+                return new Vec2(0, 0);
+            }
+        }
+        
+        class Particle {
+            constructor(x, y) {
+                this.pos = new Vec2(x, y);
+                this.oldPos = new Vec2(x, y);
+                this.pinned = false;
+                this.mass = 1;
+            }
+            
+            update() {
+                if (this.pinned) return;
+                
+                let vel = this.pos.sub(this.oldPos);
+                this.oldPos = new Vec2(this.pos.x, this.pos.y);
+                
+                // Apply gravity
+                let gravity = parseFloat(document.getElementById('gravity').value);
+                this.pos.y += gravity;
+                
+                // Apply velocity with stronger damping for stability
+                this.pos = this.pos.add(vel.mult(0.995));
+                
+                // Boundary constraints
+                if (this.pos.x < 15) {
+                    this.pos.x = 15;
+                    this.oldPos.x = this.pos.x + (this.pos.x - this.oldPos.x) * 0.8;
+                }
+                if (this.pos.x > 585) {
+                    this.pos.x = 585;
+                    this.oldPos.x = this.pos.x + (this.pos.x - this.oldPos.x) * 0.8;
+                }
+                if (this.pos.y < 15) {
+                    this.pos.y = 15;
+                    this.oldPos.y = this.pos.y + (this.pos.y - this.oldPos.y) * 0.8;
+                }
+                if (this.pos.y > 385) {
+                    this.pos.y = 385;
+                    this.oldPos.y = this.pos.y + (this.pos.y - this.oldPos.y) * 0.8;
+                }
+            }
+            
+            pin() {
+                this.pinned = true;
+            }
+        }
+        
+        class Constraint {
+            constructor(p1, p2, stiffness = 1) {
+                this.p1 = p1;
+                this.p2 = p2;
+                this.restLength = p1.pos.sub(p2.pos).length();
+                this.stiffness = stiffness;
+            }
+            
+            update() {
+                let delta = this.p1.pos.sub(this.p2.pos);
+                let distance = delta.length();
+                let difference = (this.restLength - distance) / distance;
+                let translate = delta.mult(difference * 0.5 * this.stiffness);
+                
+                if (!this.p1.pinned) {
+                    this.p1.pos = this.p1.pos.add(translate);
+                }
+                if (!this.p2.pinned) {
+                    this.p2.pos = this.p2.pos.sub(translate);
+                }
+            }
+        }
+        
+        class VerletWorld {
+            constructor() {
+                this.particles = [];
+                this.constraints = [];
+            }
+            
+            addParticle(particle) {
+                this.particles.push(particle);
+                return particle;
+            }
+            
+            addConstraint(constraint) {
+                this.constraints.push(constraint);
+                return constraint;
+            }
+            
+            update() {
+                // Update particles
+                this.particles.forEach(particle => particle.update());
+                
+                // Satisfy constraints multiple times for stability
+                for (let i = 0; i < 4; i++) {
+                    this.constraints.forEach(constraint => constraint.update());
+                }
+            }
+            
+            clear() {
+                this.particles = [];
+                this.constraints = [];
+            }
+        }
+        
+        let canvas = document.getElementById('canvas');
+        let ctx = canvas.getContext('2d');
+        let world = new VerletWorld();
+        let blob = { particles: [], constraints: [] };
+        let mousePos = { x: 0, y: 0 };
+        let isDragging = false;
+        let dragPoint = null;
+        let lastMousePos = { x: 0, y: 0 };
+        
+        function createBlob() {
+            let centerX = canvas.width / 2;
+            let centerY = canvas.height / 2;
+            let radius = parseInt(document.getElementById('size').value);
+            let segments = parseInt(document.getElementById('density').value);
+            let gooiness = parseFloat(document.getElementById('gooiness').value);
+            
+            blob.particles = [];
+            blob.constraints = [];
+            
+            // Create particles in a circle
+            for (let i = 0; i < segments; i++) {
+                let angle = (i / segments) * Math.PI * 2;
+                let x = centerX + Math.cos(angle) * radius;
+                let y = centerY + Math.sin(angle) * radius;
+                let particle = new Particle(x, y);
+                blob.particles.push(particle);
+                world.addParticle(particle);
+            }
+            
+            // Add center particle
+            let centerParticle = new Particle(centerX, centerY);
+            blob.particles.push(centerParticle);
+            world.addParticle(centerParticle);
+            
+            // Create constraints
+            let stiffness = 0.2 + (gooiness - 1) * 0.08; // Higher gooiness = stiffer
+            
+            // Connect adjacent particles around the circle
+            for (let i = 0; i < segments; i++) {
+                let next = (i + 1) % segments;
+                let constraint = new Constraint(blob.particles[i], blob.particles[next], stiffness);
+                blob.constraints.push(constraint);
+                world.addConstraint(constraint);
+            }
+            
+            // Connect each particle to center
+            for (let i = 0; i < segments; i++) {
+                let constraint = new Constraint(blob.particles[i], centerParticle, stiffness * 0.7);
+                blob.constraints.push(constraint);
+                world.addConstraint(constraint);
+            }
+            
+            // Cross connections for more stability (every other particle)
+            for (let i = 0; i < segments; i += 2) {
+                let opposite = (i + segments/2) % segments;
+                if (opposite !== i) {
+                    let constraint = new Constraint(blob.particles[i], blob.particles[opposite], stiffness * 0.3);
+                    blob.constraints.push(constraint);
+                    world.addConstraint(constraint);
+                }
+            }
+            
+            // Additional internal structure for higher density
+            if (segments > 12) {
+                for (let i = 0; i < segments; i++) {
+                    let next2 = (i + 2) % segments;
+                    let constraint = new Constraint(blob.particles[i], blob.particles[next2], stiffness * 0.4);
+                    blob.constraints.push(constraint);
+                    world.addConstraint(constraint);
+                }
+            }
+        }
+        
+        function resetBlob() {
+            world.clear();
+            createBlob();
+        }
+        
+        function animate() {
+            world.update();
+            
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw boundaries
+            ctx.fillStyle = '#333';
+            ctx.fillRect(0, 0, canvas.width, 10); // top
+            ctx.fillRect(0, canvas.height - 10, canvas.width, 10); // bottom
+            ctx.fillRect(0, 0, 10, canvas.height); // left
+            ctx.fillRect(canvas.width - 10, 0, 10, canvas.height); // right
+            
+            // Draw blob
+            if (blob.particles.length > 0) {
+                // Draw filled blob shape
+                ctx.fillStyle = 'rgba(100, 150, 255, 0.6)';
+                ctx.beginPath();
+                
+                // Create smooth blob outline
+                let outerParticles = blob.particles.slice(0, -1); // exclude center
+                if (outerParticles.length > 0) {
+                    ctx.moveTo(outerParticles[0].pos.x, outerParticles[0].pos.y);
+                    
+                    for (let i = 1; i < outerParticles.length; i++) {
+                        let current = outerParticles[i];
+                        let next = outerParticles[(i + 1) % outerParticles.length];
+                        let prev = outerParticles[i - 1];
+                        
+                        // Create smooth curve
+                        let cp1x = prev.pos.x + (current.pos.x - prev.pos.x) * 0.5;
+                        let cp1y = prev.pos.y + (current.pos.y - prev.pos.y) * 0.5;
+                        let cp2x = current.pos.x + (next.pos.x - current.pos.x) * 0.5;
+                        let cp2y = current.pos.y + (next.pos.y - current.pos.y) * 0.5;
+                        
+                        ctx.quadraticCurveTo(current.pos.x, current.pos.y, cp2x, cp2y);
+                    }
+                    
+                    ctx.closePath();
+                    ctx.fill();
+                }
+                
+                // Draw constraints
+                ctx.strokeStyle = 'rgba(100, 150, 255, 0.3)';
+                ctx.lineWidth = 1;
+                blob.constraints.forEach(constraint => {
+                    ctx.beginPath();
+                    ctx.moveTo(constraint.p1.pos.x, constraint.p1.pos.y);
+                    ctx.lineTo(constraint.p2.pos.x, constraint.p2.pos.y);
+                    ctx.stroke();
+                });
+                
+                // Draw particles
+                ctx.fillStyle = 'rgba(100, 150, 255, 0.8)';
+                blob.particles.forEach((particle, index) => {
+                    ctx.beginPath();
+                    let radius = index === blob.particles.length - 1 ? 4 : 3; // center particle slightly larger
+                    ctx.arc(particle.pos.x, particle.pos.y, radius, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+            }
+            
+            requestAnimationFrame(animate);
+        }
+        
+        // Mouse interaction
+        canvas.addEventListener('mousedown', (e) => {
+            let rect = canvas.getBoundingClientRect();
+            mousePos.x = e.clientX - rect.left;
+            mousePos.y = e.clientY - rect.top;
+            lastMousePos = { ...mousePos };
+            
+            // Find closest particle to mouse
+            let minDist = Infinity;
+            let closestParticle = null;
+            
+            blob.particles.forEach(particle => {
+                let dist = Math.sqrt(
+                    (particle.pos.x - mousePos.x) ** 2 + 
+                    (particle.pos.y - mousePos.y) ** 2
+                );
+                if (dist < minDist && dist < 50) {
+                    minDist = dist;
+                    closestParticle = particle;
+                }
+            });
+            
+            if (closestParticle) {
+                isDragging = true;
+                dragPoint = closestParticle;
+            }
+        });
+        
+        canvas.addEventListener('mousemove', (e) => {
+            let rect = canvas.getBoundingClientRect();
+            let newMousePos = {
+                x: e.clientX - rect.left,
+                y: e.clientY - rect.top
+            };
+            
+            if (isDragging && dragPoint) {
+                // Direct 1:1 positioning - move particle to exactly where mouse is
+                dragPoint.pos.x = newMousePos.x;
+                dragPoint.pos.y = newMousePos.y;
+                
+                // Update old position to maintain proper velocity for throwing
+                let dx = newMousePos.x - lastMousePos.x;
+                let dy = newMousePos.y - lastMousePos.y;
+                dragPoint.oldPos.x = dragPoint.pos.x - dx;
+                dragPoint.oldPos.y = dragPoint.pos.y - dy;
+            }
+            
+            lastMousePos = newMousePos;
+            mousePos = newMousePos;
+        });
+        
+        canvas.addEventListener('mouseup', () => {
+            isDragging = false;
+            dragPoint = null;
+        });
+        
+        // Update slider value displays
+        function updateSliderValues() {
+            document.getElementById('gravityValue').textContent = document.getElementById('gravity').value;
+            document.getElementById('gooInessValue').textContent = document.getElementById('gooiness').value;
+            document.getElementById('sizeValue').textContent = document.getElementById('size').value;
+            document.getElementById('densityValue').textContent = document.getElementById('density').value;
+        }
+        
+        document.getElementById('gravity').addEventListener('input', updateSliderValues);
+        document.getElementById('gooiness').addEventListener('input', () => {
+            updateSliderValues();
+            resetBlob();
+        });
+        document.getElementById('size').addEventListener('input', () => {
+            updateSliderValues();
+            resetBlob();
+        });
+        document.getElementById('density').addEventListener('input', () => {
+            updateSliderValues();
+            resetBlob();
+        });
+        
+        // Initialize
+        createBlob();
+        updateSliderValues();
+        animate();
+    </script>
+</body>
+</html>

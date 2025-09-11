@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<title>Verlet Shapes</title>
+	<meta charset="UTF-8" />
+	<link rel="stylesheet" href="../css/style.css" type="text/css" media="screen, projection" />
+	<link href='http://fonts.googleapis.com/css?family=Libre+Baskerville:400,700,400italic' rel='stylesheet' type='text/css'>
+	<script type="text/javascript" src="../js/verlet-1.0.0.js"></script>
+</head>
+<body>
+	<script type="text/javascript" src="../site/js/common.js"></script>
+	<div id="header">
+		<div id="bsa">
+			<script type="text/javascript" src="http://cdn.adpacks.com/adpacks.js?legacyid=1285933&zoneid=1386&key=3df5e2ea1c6a237386fb9d4cdf5b99f0&serve=C6SD52Y&placement=subprotocolcom&circle=dev" id="_adpacks_js"></script>
+		</div>
+		<p>
+			
+			
+			<div style="margin: 10px 0 6px 16px;">
+				<label for="gravityRange">Gravity (g<sub>y</sub>): </label>
+				<input id="gravityRange" type="range" min="-1.00" max="2.00" step="0.01" value="0.20" />
+				<span id="gravityValue">0.20</span>
+			</div>
+			<div style="margin: 4px 0 10px 16px;">
+				<label for="viscosityRange">Viscosity:</label>
+				<input id="viscosityRange" type="range" min="0" max="1" step="0.01" value="0.75" />
+				<span id="viscosityLabel">dough</span>
+			</div>
+				</p>
+	</div>
+	<canvas id="scratch" style="width: 800px; height: 500px;"></canvas>
+	<script type="text/javascript">
+
+	window.onload = function() {
+		var canvas = document.getElementById("scratch");
+
+		// canvas dimensions
+		var width = parseInt(canvas.style.width);
+		var height = parseInt(canvas.style.height);
+
+		// retina
+		var dpr = window.devicePixelRatio || 1;
+		canvas.width = width*dpr;
+		canvas.height = height*dpr;
+		canvas.getContext("2d").scale(dpr, dpr);
+
+		// simulation
+		var sim = new VerletJS(width, height, canvas);
+		sim.friction = 0.99; // add a bit of damping to reduce runaway deformation
+		sim.groundFriction = 0.9; // slightly higher ground friction
+		// ensure drag release even if mouseup happens outside the canvas
+		window.addEventListener("mouseup", function() {
+			sim.mouseDown = false;
+			sim.draggedEntity = null;
+		});
+		window.addEventListener("blur", function() {
+			sim.mouseDown = false;
+			sim.draggedEntity = null;
+		});
+		canvas.addEventListener("mouseleave", function() {
+			if (!sim.mouseDown) sim.draggedEntity = null;
+		});
+		// add a top wall by clamping y >= 0 as well
+		sim.bounds = function (particle) {
+			if (particle.pos.y > height-1)
+				particle.pos.y = height-1;
+			if (particle.pos.y < 0)
+				particle.pos.y = 0;
+			if (particle.pos.x < 0)
+				particle.pos.x = 0;
+			if (particle.pos.x > width-1)
+				particle.pos.x = width-1;
+		};
+		
+		// entities: thick triangulated tire (two rims + spokes + cross-bracing)
+		function thickTire(sim, origin, rOuter, rInner, segments, stiffness) {
+			var comp = new sim.Composite();
+			var center = new Particle(new Vec2(origin.x, origin.y));
+			var inner = [], outer = [];
+			comp.particles.push(center);
+			for (var i=0;i<segments;++i) {
+				var th = (2*Math.PI*i)/segments;
+				outer.push(comp.particles.push(new Particle(new Vec2(origin.x + Math.cos(th)*rOuter, origin.y + Math.sin(th)*rOuter)))-1);
+				var th2 = th + Math.PI/segments; // offset inner ring by half-step
+				inner.push(comp.particles.push(new Particle(new Vec2(origin.x + Math.cos(th2)*rInner, origin.y + Math.sin(th2)*rInner)))-1);
+			}
+			// ring constraints with local cross-bracing
+			for (var j=0;j<segments;++j) {
+				var o = outer[j], o1 = outer[(j+1)%segments], o2 = outer[(j+2)%segments];
+				var ii = inner[j], i1 = inner[(j+1)%segments], i2 = inner[(j+2)%segments];
+				comp.constraints.push(new DistanceConstraint(comp.particles[o], comp.particles[o1], stiffness));
+				comp.constraints.push(new DistanceConstraint(comp.particles[o], comp.particles[o2], stiffness));
+				comp.constraints.push(new DistanceConstraint(comp.particles[ii], comp.particles[i1], stiffness));
+				comp.constraints.push(new DistanceConstraint(comp.particles[ii], comp.particles[i2], stiffness));
+				// long chords across the outer ring to resist flattening
+				var half = Math.floor(segments/2);
+				comp.constraints.push(new DistanceConstraint(comp.particles[o], comp.particles[outer[(j+half)%segments]], stiffness));
+				// radial and shear connections between rings (triangles)
+				comp.constraints.push(new DistanceConstraint(comp.particles[o], comp.particles[ii], stiffness));
+				comp.constraints.push(new DistanceConstraint(comp.particles[o], comp.particles[i1], stiffness));
+				// spokes to center from inner ring
+				comp.constraints.push(new DistanceConstraint(comp.particles[ii], comp.particles[0], stiffness));
+			}
+			// angular constraints along both rings for anti-shear (hidden in draw)
+			for (var k=0;k<segments;++k) {
+				comp.constraints.push(new AngleConstraint(
+					comp.particles[outer[(k-1+segments)%segments]],
+					comp.particles[outer[k]],
+					comp.particles[outer[(k+1)%segments]],
+					0.35
+				));
+				comp.constraints.push(new AngleConstraint(
+					comp.particles[inner[(k-1+segments)%segments]],
+					comp.particles[inner[k]],
+					comp.particles[inner[(k+1)%segments]],
+					0.35
+				));
+			}
+			// hide angle constraints in rendering
+			comp.drawConstraints = function(ctx, comp) {
+				for (var t=0;t<comp.constraints.length;++t) {
+					var cc = comp.constraints[t];
+					if (!(cc instanceof AngleConstraint)) cc.draw(ctx);
+				}
+			};
+			// area preservation bias: gently pull outer ring towards the initial circle radius
+			var targetR = (rOuter + rInner)*0.5;
+			var centerIdx = 0;
+			comp.drawParticles = comp.drawParticles; // keep default
+			var origDraw = comp.drawConstraints;
+			comp.drawConstraints = comp.drawConstraints; // keep default override set earlier if any
+			comp.relaxArea = function(stepCoef){
+				for (var u=0;u<outer.length;++u) {
+					var p = comp.particles[outer[u]];
+					var c = comp.particles[centerIdx];
+					var v = p.pos.sub(c.pos);
+					var len = Math.sqrt(v.x*v.x + v.y*v.y) || 1;
+					var desired = targetR;
+					var coef = (window.__areaCoef !== undefined) ? window.__areaCoef : 0.002;
+					var delta = (desired - len) * coef; // small radial correction
+					p.pos.x += (v.x/len) * delta;
+					p.pos.y += (v.y/len) * delta;
+				}
+			};
+			// Hook our area relax into engine by wrapping frame constraints later via a monkey patch
+			sim.__areaRelaxors = sim.__areaRelaxors || [];
+			sim.__areaRelaxors.push(function(stepCoef){ comp.relaxArea(stepCoef); });
+			sim.composites.push(comp);
+			return comp;
+		}
+		
+		var ball = thickTire(sim, new Vec2(140, height - 160), 70, 40, 36, 1);
+
+		// gravity slider wiring
+		var gravitySlider = document.getElementById("gravityRange");
+		var gravityValue = document.getElementById("gravityValue");
+		gravitySlider.value = sim.gravity.y;
+		gravityValue.innerHTML = parseFloat(sim.gravity.y).toFixed(2);
+		gravitySlider.addEventListener("input", function() {
+			sim.gravity.y = parseFloat(this.value);
+			gravityValue.innerHTML = parseFloat(this.value).toFixed(2);
+		});
+
+		// viscosity slider wiring (controls damping and constraint iterations)
+		var viscSlider = document.getElementById("viscosityRange");
+		var viscLabel = document.getElementById("viscosityLabel");
+		function applyViscosity(v) {
+			// v in [0,1]; map to friction and solver steps
+			// low v -> honey (more spread): lower friction, fewer iterations
+			// high v -> dough (less spread): higher friction, more iterations
+			var friction = 0.85 + 0.14*v; // 0.85..0.99 (wider range)
+			sim.friction = friction;
+			window.__solverSteps = Math.round(16 + 112*v); // 16..128
+			// stronger area correction at high viscosity to keep blob tall
+			window.__areaCoef = 0.001 + 0.006*v; // 0.001..0.007
+			viscLabel.innerHTML = v > 0.6 ? "dough" : v < 0.3 ? "honey" : "medium";
+		}
+		applyViscosity(parseFloat(viscSlider.value));
+		viscSlider.addEventListener("input", function(){
+			applyViscosity(parseFloat(this.value));
+		});
+
+		// animation loop
+		var loop = function() {
+			var steps = window.__solverSteps || 64;
+			sim.frame(steps);
+			// apply area relaxors after each frame pass
+			if (sim.__areaRelaxors) {
+				var stepCoef = 1/steps;
+				for (var rr=0; rr<sim.__areaRelaxors.length; ++rr) sim.__areaRelaxors[rr](stepCoef);
+			}
+			sim.draw();
+			requestAnimFrame(loop);
+		};
+
+		loop();
+	};
+	
+	
+	</script>
+</body>
