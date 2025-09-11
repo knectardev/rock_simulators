@@ -16,7 +16,7 @@ const CANVAS_SIZE = 800;
 let num_points = 60;
 let thickness = CANVAS_SIZE / 40;
 let inner_radius = CANVAS_SIZE / 5;
-let outer_radius = inner_radius + thickness;
+let outer_radius = inner_radius + thickness; // treated as fixed visual rim; thickness adjusts inward
 
 let points = [];
 let springs = [];
@@ -38,12 +38,22 @@ const OBSTACLE_COUNT = 6; // target number of obstacles kept in play (2x frequen
 const OUTER_RIM_K = 20000;
 const INNER_SPOKE_K = 400;
 let BLOB_FILL_GRAY = 0; // grayscale value used for blob fills
+// Space-bar toggle to pause/resume spawning new obstacles
+let SPAWN_PAUSED = false;
+// Distributed tug parameters
+const DRAG_NEIGHBOR_RANGE = 2; // number of neighbors on each side
+const DRAG_NEIGHBOR_DECAY = 0.6; // weight falloff per step
+const DRAG_PAIR_WEIGHT = 0.5; // how strongly the paired ring participates
+const DRAG_DAMP_MULTIPLIER = 2.0; // extra damping during drag to reduce jiggle
 
 // Symmetry / visualization controls
 let ADD_RANDOM_CROSS_SPRINGS = false; // true = more tangled chords, false = cleaner symmetry
 let DRAW_ALL_INTERNAL_SPRINGS = false; // true = draw every spring, false = mostly rim
 let DRAW_CENTER_SPRINGS = false; // draw spokes to center if true
 const HUB_RADIUS = 20; // visual hub radius in pixels
+
+// Soft body instance (encapsulates points, springs, radii, vertex count)
+let softBody = null;
 
 // Stabilization controls to discourage self-wrapping
 let PRESSURE_K = 0.005; // area restoring coefficient (safer)
@@ -56,45 +66,126 @@ let VISC_BEND_COEF = 0.25; // velocity smoother coefficient
 // Safety clamps
 let MAX_PRESSURE_FORCE = 2500;
 let MAX_EXTRA_FORCE = 6000; // for repulsion and bending contributions
+let CONTACT_BAND = 8; // pixel band around obstacle surfaces where friction engages
+// Obstacle dynamics constants
+let OBSTACLE_DENSITY = 0.005; // mass per pixel^2 for obstacles
+let OBSTACLE_DAMPING = 3.5; // velocity damping for obstacles
+let CONTACT_FORCE_FACTOR = 0.25; // scales blob->obstacle force transfer
+let BLOB_MASS_PER_AREA = 0.002; // blob mass per pixel^2 (scaled by density)
+// Force visualization
+const FORCE_VIS_SCALE = 0.03; // pixels per unit force
+const FORCE_VIS_MAX_LEN = 120; // clamp for display
+const BLOB_FORCE_EMA = 0.25; // smoothing for blob net-force arrow
+let blobVisFx = 0; // EMA state: blob force x
+let blobVisFy = 0; // EMA state: blob force y
+const VELOCITY_VIS_SCALE = 1.2; // fallback scale for velocity arrows
+const ARROW_HEAD_SIZE = 8; // size of arrow heads in pixels
 
 // UI sliders for background color
-let rSlider, vertexSlider, gravitySlider, fillColorSlider;
+let rSlider, vertexSlider, gravitySlider, densitySlider, fillColorSlider, thicknessSlider, frictionSlider, obstacleDensitySlider;
+// UI labels positioned next to sliders
+let rLabel, vertexLabel, gravityLabel, densityLabel, thicknessLabel, fillLabel, frictionLabel, obstacleDensityLabel;
+let uiPanel;
 // UI checkboxes for visibility
-let fillCheckbox, rimCheckbox, wireCheckbox, solidCheckbox;
+let fillCheckbox, rimCheckbox, wireCheckbox, pointsCheckbox, solidCheckbox;
 // Base vertices for scaling
 let BASE_NUM_POINTS;
 
 function setup() {
 	frameRate(FRAME);
-	createCanvas(1000, 800);
+	createCanvas(1200, 800);
 
 	// Inline sliders at upper-left of canvas
 	textSize(15);
+	// Panel backdrop
+	uiPanel = createDiv('');
+	uiPanel.position(8, 8);
+	uiPanel.style('background', 'rgba(255,255,255,0.7)');
+	uiPanel.style('border', '1px solid #000');
+	uiPanel.style('padding', '8px');
+	uiPanel.style('width', '360px');
+	uiPanel.style('height', '420px');
+	uiPanel.style('z-index', '0');
+
 	rSlider = createSlider(0, 255, 255);
 	rSlider.position(20, 20);
+	styleSlider(rSlider);
 	// Vertex count slider (centered at 1x): value in [-1,1] mapped to factor 2^v => [0.5,2]
 	vertexSlider = createSlider(-1, 1, 0, 0.01);
 	vertexSlider.position(20, 50);
+	styleSlider(vertexSlider);
 	// Gravity scale slider: 0.5x .. 2x (center at 1.0)
 	gravitySlider = createSlider(0.5, 5.0, 1.0, 0.01);
 	gravitySlider.position(20, 80);
+	styleSlider(gravitySlider);
+	// Density slider: scales blob mass and pressure response (0.25x .. 2.0x)
+	densitySlider = createSlider(0.25, 2.0, 1.0, 0.01);
+	densitySlider.position(20, 110);
+	styleSlider(densitySlider);
+	// Rim thickness slider (pixels) – fixed range [10, 50]
+	thicknessSlider = createSlider(10, 50, constrain(thickness, 10, 50), 1);
+	thicknessSlider.position(20, 140);
+	styleSlider(thicknessSlider);
 	// Blob fill color slider (grayscale 0..255)
 	fillColorSlider = createSlider(0, 255, 0, 1);
-	fillColorSlider.position(20, 210);
+	fillColorSlider.position(20, 170);
+	styleSlider(fillColorSlider);
+	// Surface friction slider (0 = slippery, higher = stickier)
+	frictionSlider = createSlider(0, 10, 2.5, 0.1);
+	frictionSlider.position(20, 200);
+	styleSlider(frictionSlider);
+	// Obstacle material density (relative)
+	obstacleDensitySlider = createSlider(0.25, 4.0, 1.0, 0.01);
+	obstacleDensitySlider.position(20, 230);
+	styleSlider(obstacleDensitySlider);
+
+	// Labels next to sliders (sans-serif)
+	rLabel = createDiv('red');
+	styleLabel(rLabel);
+	rLabel.position(rSlider.x + rSlider.width + 16, rSlider.y - 4);
+	vertexLabel = createDiv('vertices ' + num_points);
+	styleLabel(vertexLabel);
+	vertexLabel.position(vertexSlider.x + vertexSlider.width + 16, vertexSlider.y - 4);
+	gravityLabel = createDiv('gravity 1.00x');
+	styleLabel(gravityLabel);
+	gravityLabel.position(gravitySlider.x + gravitySlider.width + 16, gravitySlider.y - 4);
+	densityLabel = createDiv('density 1.00x');
+	styleLabel(densityLabel);
+	densityLabel.position(densitySlider.x + densitySlider.width + 16, densitySlider.y - 4);
+	thicknessLabel = createDiv('rim thickness ' + Math.round(thickness) + 'px');
+	styleLabel(thicknessLabel);
+	thicknessLabel.position(thicknessSlider.x + thicknessSlider.width + 16, thicknessSlider.y - 4);
+	fillLabel = createDiv('fill color');
+	styleLabel(fillLabel);
+	fillLabel.position(fillColorSlider.x + fillColorSlider.width + 16, fillColorSlider.y - 4);
+	frictionLabel = createDiv('friction 0.00');
+	styleLabel(frictionLabel);
+	frictionLabel.position(frictionSlider.x + frictionSlider.width + 16, frictionSlider.y - 4);
+	obstacleDensityLabel = createDiv('obstacle density 1.00x');
+	styleLabel(obstacleDensityLabel);
+	obstacleDensityLabel.position(obstacleDensitySlider.x + obstacleDensitySlider.width + 16, obstacleDensitySlider.y - 4);
 
 	// Checkboxes (cumulative)
-	fillCheckbox = createCheckbox('Display blob fill', true);
-	fillCheckbox.position(20, 110);
-	rimCheckbox = createCheckbox('Display blob border rim', true);
-	rimCheckbox.position(20, 135);
-	wireCheckbox = createCheckbox('Display blob wire-frame', false);
-	wireCheckbox.position(20, 160);
+	fillCheckbox = createCheckbox('Display blob fill', false);
+	fillCheckbox.position(20, 250);
+	styleCheckbox(fillCheckbox);
+	rimCheckbox = createCheckbox('Display blob border rim', false);
+	rimCheckbox.position(20, 275);
+	styleCheckbox(rimCheckbox);
+	wireCheckbox = createCheckbox('Display blob wire-frame', true);
+	wireCheckbox.position(20, 300);
+	styleCheckbox(wireCheckbox);
+	pointsCheckbox = createCheckbox('Display mesh points', false);
+	pointsCheckbox.position(20, 325);
+	styleCheckbox(pointsCheckbox);
 	solidCheckbox = createCheckbox('Display blob solid interior', false);
-	solidCheckbox.position(20, 185);
+	solidCheckbox.position(20, 350);
+	styleCheckbox(solidCheckbox);
 	
 	// Build initial blob geometry and springs
 	BASE_NUM_POINTS = num_points;
-	initializeBlob(num_points);
+	softBody = new SoftBody(inner_radius, outer_radius, num_points);
+	softBody.initializeGeometry();
 	
 	if (ADD_RANDOM_CROSS_SPRINGS) {
 		for (var i = 0; i < 100; i++) {
@@ -113,8 +204,10 @@ function setup() {
 		new ObstacleCircle(CANVAS_SIZE*3.5/4, CANVAS_SIZE*2/3, CANVAS_SIZE/20)
 	];
 
-	// Compute rest area of the outer rim polygon
-	restOuterArea = computeOuterArea();
+	// Rest area already computed within softBody.initializeGeometry()
+
+	// Ensure space bar works even when UI elements have focus
+	window.addEventListener('keydown', handleGlobalKeydown);
 }
 
 function draw() {
@@ -123,16 +216,24 @@ function draw() {
 	const vertFactor = pow(2, vertexSlider ? vertexSlider.value() : 0);
 	const targetVerts = max(4, Math.round(BASE_NUM_POINTS * vertFactor));
 	if (targetVerts !== num_points) {
-		initializeBlob(targetVerts);
-		restOuterArea = computeOuterArea();
+		softBody.rebuildVertexCount(targetVerts);
 		draggingBlob = false;
 		draggedPointIndex = -1;
 	}
 	const g = 11;
 	const gravScale = gravitySlider ? gravitySlider.value() : 1;
+	const densityScale = densitySlider ? densitySlider.value() : 1;
     background(r, g, BACKGROUND_BLUE);
 	// Update current blob fill gray for rendering functions
 	BLOB_FILL_GRAY = fillColorSlider ? fillColorSlider.value() : 0;
+
+	// Rebuild geometry if rim thickness changed
+	const targetThickness = thicknessSlider ? thicknessSlider.value() : thickness;
+	if (targetThickness !== thickness) {
+		softBody.rebuildThickness(targetThickness);
+		draggingBlob = false;
+		draggedPointIndex = -1;
+	}
 
 	updatePhysics();
 	// Apply constant vertical scroll based solely on gravity (decoupled from collisions)
@@ -141,15 +242,34 @@ function draw() {
 	recycleObstacles();
 	drawObjects();
 
-	// Labels next to sliders
-	push();
-	noStroke();
-	fill(0);
-	text('red', rSlider.x * 2 + rSlider.width, 35);
-	text('vertices ' + num_points, vertexSlider.x * 2 + vertexSlider.width, 65);
-	text('gravity ' + gravScale.toFixed(2) + 'x', gravitySlider.x * 2 + gravitySlider.width, 95);
-	text('fill color', fillColorSlider.x * 2 + fillColorSlider.width, 225);
-	pop();
+	// Update dynamic labels (sans-serif HTML labels)
+	if (vertexLabel) vertexLabel.html('vertices ' + num_points);
+	if (gravityLabel) gravityLabel.html('gravity ' + gravScale.toFixed(2) + 'x');
+	if (densityLabel) densityLabel.html('density ' + getDensityScale().toFixed(2) + 'x');
+	if (thicknessLabel) thicknessLabel.html('rim thickness ' + Math.round(thickness) + 'px');
+	if (frictionLabel && frictionSlider) frictionLabel.html('friction ' + (frictionSlider.value() * 1.0).toFixed(2));
+	if (obstacleDensityLabel && obstacleDensitySlider) obstacleDensityLabel.html('obstacle density ' + obstacleDensitySlider.value().toFixed(2) + 'x');
+}
+
+// UI styling helpers
+function styleLabel(el) {
+	el.style('font-family', 'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif');
+	el.style('font-size', '14px');
+	el.style('color', '#111');
+	el.style('line-height', '18px');
+}
+
+function styleSlider(el) {
+	el.style('width', '180px');
+	el.style('accent-color', '#6a0dad');
+	el.style('margin', '0');
+}
+
+function styleCheckbox(el) {
+	el.style('font-family', 'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif');
+	el.style('font-size', '14px');
+	el.style('color', '#111');
+	el.style('line-height', '18px');
 }
 
 function pointDistance(point_1, point_2) {
@@ -198,6 +318,12 @@ class ObstacleCircle {
 		this.x = x;
 		this.y = y;
 		this.r = r;
+		// dynamics
+		this.vx = 0;
+		this.vy = 0;
+		this.ax = 0;
+		this.ay = 0;
+		this.mass = max(1, PI * r * r * OBSTACLE_DENSITY);
 	}
 
 	distance(p) {
@@ -212,13 +338,55 @@ class ObstacleCircle {
 		pop();
 	}
 
+	applyForce(fx, fy) {
+		this.ax += fx / this.mass;
+		this.ay += fy / this.mass;
+	}
+
 	contains(px, py) {
 		return sqrt(pow(px - this.x, 2) + pow(py - this.y, 2)) <= this.r;
 	}
 }
 
+// SoftBody encapsulates the blob's geometry and state while preserving existing globals
+class SoftBody {
+    constructor(innerRadius, outerRadius, vertexCount) {
+        this.innerRadius = innerRadius;
+        this.outerRadius = outerRadius;
+        this.vertexCount = vertexCount;
+        this.restOuterArea = 0;
+    }
+
+    initializeGeometry() {
+        // Keep outer radius fixed; thickness derives from radii
+        inner_radius = this.innerRadius;
+        outer_radius = this.outerRadius;
+        thickness = outer_radius - inner_radius;
+        SELF_REPEL_RADIUS = thickness * 1.6;
+        // Rebuild using existing initializer to preserve behavior
+        initializeBlob(this.vertexCount);
+        this.restOuterArea = computeOuterArea();
+        // Mirror global for legacy helpers
+        restOuterArea = this.restOuterArea;
+    }
+
+    rebuildVertexCount(newCount) {
+        this.vertexCount = newCount;
+        this.initializeGeometry();
+    }
+
+    rebuildThickness(targetThickness) {
+        // Keep outer fixed, adjust inner inward
+        this.innerRadius = max(10, this.outerRadius - targetThickness);
+        this.initializeGeometry();
+    }
+}
+
 function normalizeVec2(p) {
 	let m = sqrt(p[0] * p[0] + p[1] * p[1]);
+	if (!isFinite(m) || m < 1e-12) {
+		return [0, 0];
+	}
 	return [p[0] / m, p[1] / m];
 }
 
@@ -229,18 +397,34 @@ function getNorm(p) {
 }
 
 function sdf_force(p) {
+	// If there are no obstacles, there should be no SDF force
+	if (obstacles.length === 0) {
+		return [0, 0];
+	}
 	let norm = getNorm(p);
 	let factor = min(exp(30 * -sdf(p)), 1000);
+	if (!isFinite(norm[0]) || !isFinite(norm[1])) {
+		return [0, 0];
+	}
 	return [factor * norm[0], factor * norm[1]];
+}
+
+function getDensityScale() {
+	// Reverse polarity mapping so left is high density and right is low density
+	// We keep the UI min..max as 0.25..2.0 but interpret as 2.0..0.25
+	let v = densitySlider ? densitySlider.value() : 1;
+	let dmin = 0.25, dmax = 2.0;
+	return dmin + (dmax - dmin) * (1 - (v - dmin) / (dmax - dmin));
 }
 
 function updatePhysics() {
 	// Reset point acceleration
 	for (var i = 0; i < points.length; i++) {
 		points[i].ax = 0;
-		// gravity scaled by slider (0.5x..2x around BASE_GRAVITY)
+		// gravity scaled by slider and opposed by density (heavier blob feels less net lift)
 		let gscale = gravitySlider ? gravitySlider.value() : 1;
-		points[i].ay = BASE_GRAVITY * gscale;
+		let dscale = getDensityScale();
+		points[i].ay = BASE_GRAVITY * gscale / dscale;
 		
 		let sdf_a = sdf_force([points[i].x, points[i].y]);
 		points[i].ax += sdf_a[0];
@@ -268,23 +452,14 @@ function updatePhysics() {
 	applyRimSelfRepulsion();
 	applyRimBending();
 	applyRimVelocitySmoothing();
+	// Apply obstacle contact friction on outer rim
+	applyObstacleFriction();
+	// Transfer reaction to obstacles and integrate obstacle motion
+	updateObstacleDynamics();
 
-	// Apply mouse spring to dragged blob point for physically-based dragging with inertia
+	// Apply mouse spring distributed across a small neighborhood to reduce creasing
 	if (draggingBlob && draggedPointIndex >= 0) {
-		let p = points[draggedPointIndex];
-		let dx = mouseX - p.x;
-		let dy = mouseY - p.y;
-		let fx = MOUSE_SPRING_K * dx - MOUSE_SPRING_DAMP * p.vx;
-		let fy = MOUSE_SPRING_K * dy - MOUSE_SPRING_DAMP * p.vy;
-		// Clamp force to avoid instability
-		let fmag = sqrt(fx*fx + fy*fy);
-		if (fmag > MOUSE_MAX_FORCE) {
-			let scale = MOUSE_MAX_FORCE / (fmag + 1e-6);
-			fx *= scale;
-			fy *= scale;
-		}
-		p.ax += fx;
-		p.ay += fy;
+		applyDistributedMouseTug(draggedPointIndex);
 	}
 	
 	// Update position and velocity
@@ -330,8 +505,10 @@ function drawObjects() {
 			}
 		}
 		// Optional node dots for clarity
-		for (var k = 0; k < points.length; k++) {
-			circle(points[k].x, points[k].y, 4);
+		if (pointsCheckbox ? pointsCheckbox.checked() : false) {
+			for (var k = 0; k < points.length; k++) {
+				circle(points[k].x, points[k].y, 4);
+			}
 		}
 		// Hub disk for continuity
 		drawHub();
@@ -340,6 +517,7 @@ function drawObjects() {
 	// Border rim (outer ring only)
 	if (showRim) {
 		stroke(0);
+		strokeWeight(2);
 		for (var j = 0; j < num_points; j++) {
 			let a = points[2 * j + 1];
 			let b = points[(2 * ((j + 1) % num_points)) + 1];
@@ -352,11 +530,84 @@ function drawObjects() {
 		if (DRAW_CENTER_SPRINGS) {
 			drawHub();
 		}
+		strokeWeight(1);
 	}
 	// Draw obstacles
 	for (var i = 0; i < obstacles.length; i++) {
 		obstacles[i].draw();
 	}
+
+	// Force vectors (green) from centers of mass
+	drawForceVectors();
+
+	// Draw mouse-to-blob tug vectors for the neighborhood while dragging
+	if (draggingBlob && draggedPointIndex >= 0) {
+		push();
+		stroke(0, 255, 0);
+		fill(0, 255, 0);
+		let isOuter = (draggedPointIndex % 2) === 1;
+		let v = Math.floor(draggedPointIndex / 2);
+		for (let k = -DRAG_NEIGHBOR_RANGE; k <= DRAG_NEIGHBOR_RANGE; k++) {
+			let j = (v + k + num_points) % num_points;
+			let idxPrimary = isOuter ? (2 * j + 1) : (2 * j);
+			let idxPair = isOuter ? (2 * j) : (2 * j + 1);
+			// Primary ring line (thicker)
+			strokeWeight(2);
+			line(points[idxPrimary].x, points[idxPrimary].y, mouseX, mouseY);
+			// Paired ring line (thinner) to show coupled influence
+			strokeWeight(1);
+			line(points[idxPair].x, points[idxPair].y, mouseX, mouseY);
+		}
+		// Handle dot at mouse
+		circle(mouseX, mouseY, 8);
+		pop();
+	}
+}
+
+// Compute and apply distributed mouse tug around the selected index
+function applyDistributedMouseTug(baseIndex) {
+	// Determine ring and logical vertex index
+	let isOuter = (baseIndex % 2) === 1;
+	let v = Math.floor(baseIndex / 2);
+	// First pass: accumulate total share so overall force equals the single-point case
+	let indices = [];
+	let shares = [];
+	let totalShare = 0;
+	for (let k = -DRAG_NEIGHBOR_RANGE; k <= DRAG_NEIGHBOR_RANGE; k++) {
+		let baseW = Math.pow(DRAG_NEIGHBOR_DECAY, Math.abs(k));
+		let j = (v + k + num_points) % num_points;
+		let idxPrimary = isOuter ? (2 * j + 1) : (2 * j);
+		let idxPair = isOuter ? (2 * j) : (2 * j + 1);
+		let wPrimary = baseW;
+		let wPair = DRAG_PAIR_WEIGHT * baseW;
+		indices.push(idxPrimary); shares.push(wPrimary); totalShare += wPrimary;
+		indices.push(idxPair);    shares.push(wPair);    totalShare += wPair;
+	}
+	// Safety
+	if (totalShare < 1e-6) totalShare = 1;
+	// Second pass: apply proportionally scaled spring+damping to each point
+	for (let s = 0; s < indices.length; s++) {
+		applyMouseSpringNormalized(indices[s], shares[s], totalShare);
+	}
+}
+
+function applyMouseSpringNormalized(pointIndex, share, totalShare) {
+	let p = points[pointIndex];
+	let dx = mouseX - p.x;
+	let dy = mouseY - p.y;
+	let shareNorm = share / totalShare;
+	let fx = (MOUSE_SPRING_K * shareNorm) * dx - (MOUSE_SPRING_DAMP * DRAG_DAMP_MULTIPLIER * shareNorm) * p.vx;
+	let fy = (MOUSE_SPRING_K * shareNorm) * dy - (MOUSE_SPRING_DAMP * DRAG_DAMP_MULTIPLIER * shareNorm) * p.vy;
+	// Clamp per-point contribution proportionally
+	let maxF = MOUSE_MAX_FORCE * shareNorm;
+	let fmag = sqrt(fx*fx + fy*fy);
+	if (fmag > maxF) {
+		let scale = maxF / (fmag + 1e-6);
+		fx *= scale;
+		fy *= scale;
+	}
+	p.ax += fx;
+	p.ay += fy;
 }
 
 function drawRimFill() {
@@ -413,6 +664,68 @@ function drawHub() {
 	pop();
 }
 
+// Draw green force vectors from blob center and obstacle centers
+function drawForceVectors() {
+	push();
+	stroke(0, 255, 0);
+	fill(0, 255, 0);
+	// Blob vector: net force over all points with EMA smoothing
+	let c = points[points.length - 1];
+	let sumFx = 0, sumFy = 0;
+	for (var i = 0; i < points.length; i++) {
+		sumFx += points[i].ax; // since ax is acceleration, force ~ a (mass factored in scale)
+		sumFy += points[i].ay;
+	}
+	// EMA smoothing
+	blobVisFx = (1 - BLOB_FORCE_EMA) * blobVisFx + BLOB_FORCE_EMA * sumFx;
+	blobVisFy = (1 - BLOB_FORCE_EMA) * blobVisFy + BLOB_FORCE_EMA * sumFy;
+	let blen = sqrt(blobVisFx*blobVisFx + blobVisFy*blobVisFy);
+	let bs = blen * FORCE_VIS_SCALE;
+	if (bs > FORCE_VIS_MAX_LEN) bs = FORCE_VIS_MAX_LEN;
+	let bux = blen > 0 ? (blobVisFx / blen) : 0;
+	let buy = blen > 0 ? (blobVisFy / blen) : 0;
+	// draw blob arrow with head
+	let bx2 = c.x + bux * bs;
+	let by2 = c.y + buy * bs;
+	line(c.x, c.y, bx2, by2);
+	// arrow head
+	let ahx1 = bx2 - bux * ARROW_HEAD_SIZE + (-buy) * (ARROW_HEAD_SIZE * 0.6);
+	let ahy1 = by2 - buy * ARROW_HEAD_SIZE + (bux) * (ARROW_HEAD_SIZE * 0.6);
+	let ahx2 = bx2 - bux * ARROW_HEAD_SIZE - (-buy) * (ARROW_HEAD_SIZE * 0.6);
+	let ahy2 = by2 - buy * ARROW_HEAD_SIZE - (bux) * (ARROW_HEAD_SIZE * 0.6);
+	line(bx2, by2, ahx1, ahy1);
+	line(bx2, by2, ahx2, ahy2);
+	// Obstacles
+	for (var i = 0; i < obstacles.length; i++) {
+		let o = obstacles[i];
+		// Prefer force if present; otherwise show velocity direction to indicate motion
+		let ofx = o.ax * o.mass;
+		let ofy = o.ay * o.mass;
+		let olen = sqrt(ofx*ofx + ofy*ofy);
+		let os = olen > 1e-6 ? (olen * FORCE_VIS_SCALE) : (sqrt(o.vx*o.vx + o.vy*o.vy) * VELOCITY_VIS_SCALE);
+		if (os > FORCE_VIS_MAX_LEN) os = FORCE_VIS_MAX_LEN;
+		let oux, ouy;
+		if (olen > 1e-6) {
+			oux = ofx / (olen + 1e-6);
+			ouy = ofy / (olen + 1e-6);
+		} else {
+			let vlen = sqrt(o.vx*o.vx + o.vy*o.vy) + 1e-6;
+			oux = o.vx / vlen;
+			ouy = o.vy / vlen;
+		}
+		let ox2 = o.x + oux * os;
+		let oy2 = o.y + ouy * os;
+		line(o.x, o.y, ox2, oy2);
+		let oahx1 = ox2 - oux * ARROW_HEAD_SIZE + (-ouy) * (ARROW_HEAD_SIZE * 0.6);
+		let oahy1 = oy2 - ouy * ARROW_HEAD_SIZE + (oux) * (ARROW_HEAD_SIZE * 0.6);
+		let oahx2 = ox2 - oux * ARROW_HEAD_SIZE - (-ouy) * (ARROW_HEAD_SIZE * 0.6);
+		let oahy2 = oy2 - ouy * ARROW_HEAD_SIZE - (oux) * (ARROW_HEAD_SIZE * 0.6);
+		line(ox2, oy2, oahx1, oahy1);
+		line(ox2, oy2, oahx2, oahy2);
+	}
+	pop();
+}
+
 // Toggle internal cross-section lines with the "i" key; toggle center spokes with "c"
 function keyPressed() {
 	if (key === 'i' || key === 'I') {
@@ -420,6 +733,15 @@ function keyPressed() {
 	}
 	if (key === 'c' || key === 'C') {
 		DRAW_CENTER_SPRINGS = !DRAW_CENTER_SPRINGS;
+	}
+}
+
+// Global key handler to catch space bar regardless of focus and clear obstacles
+function handleGlobalKeydown(e) {
+	if (e.code === 'Space' || e.key === ' ' || e.keyCode === 32) {
+		SPAWN_PAUSED = !SPAWN_PAUSED;
+		obstacles = [];
+		e.preventDefault();
 	}
 }
 
@@ -445,6 +767,119 @@ function sdfCombine(d1, d2) {
 
 function sdfCircle(p, o, r) {
 	return sqrt(pow(p[0]-o[0],2)+pow(p[1]-o[1],2)) - r;
+}
+
+// Approximate blob mass from outer area and density slider
+function computeBlobMass() {
+	let area = abs(computeOuterArea());
+	let density = getDensityScale();
+	return max(1, area * BLOB_MASS_PER_AREA * density);
+}
+
+// Apply reaction forces from blob to obstacles and integrate obstacle motion
+function updateObstacleDynamics() {
+	if (obstacles.length === 0) return;
+	let blobMass = computeBlobMass();
+	// Clear per-step accelerations
+	for (var k = 0; k < obstacles.length; k++) {
+		obstacles[k].ax = 0;
+		obstacles[k].ay = 0;
+		if (obstacleDensitySlider) {
+			obstacles[k].mass = max(1, PI * obstacles[k].r * obstacles[k].r * OBSTACLE_DENSITY * obstacleDensitySlider.value());
+		}
+	}
+	// If friction is active, transfer tangential reaction from nearby rim points
+	let mu = frictionSlider ? frictionSlider.value() : 0;
+	if (mu > 0) {
+		for (var i = 0; i < num_points; i++) {
+			let p = points[2 * i + 1];
+			// nearest obstacle
+			let nearest = null;
+			let minDist = 1e9;
+			for (var j = 0; j < obstacles.length; j++) {
+				let o = obstacles[j];
+				let d = sqrt((p.x - o.x)*(p.x - o.x) + (p.y - o.y)*(p.y - o.y)) - o.r;
+				if (d < minDist) { minDist = d; nearest = o; }
+			}
+			if (!nearest) continue;
+			if (minDist < CONTACT_BAND) {
+				// geometry
+				let dx = p.x - nearest.x;
+				let dy = p.y - nearest.y;
+				let len = sqrt(dx*dx + dy*dy) + 1e-6;
+				let nx = dx / len, ny = dy / len;
+				let tx = -ny, ty = nx;
+				// tangential velocity of point
+				let vt = p.vx * tx + p.vy * ty;
+				// reaction magnitude scaled by blob mass and proximity
+				let proximity = 1 - max(0, minDist) / CONTACT_BAND;
+				let mag = CONTACT_FORCE_FACTOR * blobMass * mu * vt * proximity;
+				// Oppose point motion: apply opposite on obstacle
+				let fx = -mag * tx;
+				let fy = -mag * ty;
+				// clamp
+				let clampF = MAX_EXTRA_FORCE;
+				let fm = sqrt(fx*fx + fy*fy);
+				if (fm > clampF) { let s = clampF / (fm + 1e-6); fx *= s; fy *= s; }
+				nearest.applyForce(fx, fy);
+			}
+		}
+	}
+	// Integrate obstacle motion
+	for (var m = 0; m < obstacles.length; m++) {
+		let o = obstacles[m];
+		// basic damping
+		o.vx += o.ax * RATE;
+		o.vy += o.ay * RATE;
+		o.vx *= exp(-OBSTACLE_DAMPING * RATE);
+		o.vy *= exp(-OBSTACLE_DAMPING * RATE);
+		o.x += o.vx * RATE;
+		o.y += o.vy * RATE;
+	}
+}
+
+// Apply tangential friction to outer rim points near obstacle surfaces
+function applyObstacleFriction() {
+	if (!frictionSlider || obstacles.length === 0) return;
+	let mu = frictionSlider.value();
+	if (mu <= 0) return;
+	// Iterate outer vertices only
+	for (var i = 0; i < num_points; i++) {
+		let p = points[2 * i + 1];
+		// Find nearest obstacle and distance
+		let nearest = null;
+		let minDist = 1e9;
+		for (var j = 0; j < obstacles.length; j++) {
+			let o = obstacles[j];
+			let d = sqrt((p.x - o.x)*(p.x - o.x) + (p.y - o.y)*(p.y - o.y)) - o.r;
+			if (d < minDist) { minDist = d; nearest = o; }
+		}
+		if (!nearest) continue;
+		// Engage friction only in a narrow band just outside the surface
+		if (minDist < CONTACT_BAND) {
+			// Compute surface normal from obstacle center to point
+			let dx = p.x - nearest.x;
+			let dy = p.y - nearest.y;
+			let len = sqrt(dx*dx + dy*dy) + 1e-6;
+			let nx = dx / len;
+			let ny = dy / len;
+			// Tangent unit vector (rotate 90 deg)
+			let tx = -ny;
+			let ty = nx;
+			// Blob point tangential velocity component
+			let vt = p.vx * tx + p.vy * ty;
+			// Viscous friction: clamp and scale with proximity
+			let proximity = 1 - max(0, minDist) / CONTACT_BAND; // 0..1
+			let fmag = -mu * vt * proximity;
+			// Clamp to prevent blow-ups
+			let maxF = MAX_EXTRA_FORCE * 0.4;
+			if (fmag >  maxF) fmag =  maxF;
+			if (fmag < -maxF) fmag = -maxF;
+			// Apply to acceleration
+			p.ax += fmag * tx;
+			p.ay += fmag * ty;
+		}
+	}
 }
 
 // Mouse interactions for dragging obstacles or the blob via a mouse spring
@@ -489,6 +924,9 @@ function mouseReleased() {
 	draggingObstacle = null;
 	draggingBlob = false;
 	draggedPointIndex = -1;
+	// Lock in the current area so pressure forces do not expand after release
+	restOuterArea = computeOuterArea();
+	if (softBody) softBody.restOuterArea = restOuterArea;
 }
 
 // Translate both blob and obstacles upward at a constant rate derived from gravity.
@@ -522,9 +960,11 @@ function recycleObstacles() {
 			obstacles.splice(i, 1);
 		}
 	}
-	// Maintain at least OBSTACLE_COUNT obstacles
-	while (obstacles.length < OBSTACLE_COUNT) {
-		obstacles.push(spawnObstacleBelow());
+	// Maintain at least OBSTACLE_COUNT obstacles unless spawning is paused
+	if (!SPAWN_PAUSED) {
+		while (obstacles.length < OBSTACLE_COUNT) {
+			obstacles.push(spawnObstacleBelow());
+		}
 	}
 }
 
@@ -542,9 +982,15 @@ function computeOuterArea() {
 // Apply pressure forces proportional to area deviation to preserve shape area
 function applyPressureForces() {
 	let area = computeOuterArea();
+	if (softBody && softBody.restOuterArea !== 0) {
+		restOuterArea = softBody.restOuterArea;
+	}
 	if (restOuterArea === 0) return;
 	let rel = (restOuterArea - area) / restOuterArea;
-	let pressure = PRESSURE_K * rel; // positive when area shrinks
+	// Use a slightly stiffer correction only when area is below target to avoid post-drag inflation
+	let k = rel > 0 ? PRESSURE_K * 1.25 : PRESSURE_K * 0.6;
+	let dscaleP = getDensityScale();
+	let pressure = (k * dscaleP) * rel; // heavier blob exerts stronger pressure
 	if (pressure === 0) return;
 
 	// Determine outward normal orientation
@@ -652,10 +1098,10 @@ function initializeBlob(newNumPoints) {
 	num_points = newNumPoints;
 	// Points
 	for (var i = 0; i < num_points; i++) {
-		points.push(new Point(CANVAS_SIZE/2 + inner_radius * cos(2 * PI * i / num_points), CANVAS_SIZE/2 + inner_radius * sin(2 * PI * i / num_points)));
-		points.push(new Point(CANVAS_SIZE/2 + outer_radius * cos(2 * PI * i / num_points), CANVAS_SIZE/2 + outer_radius * sin(2 * PI * i / num_points)));
+		points.push(new Point(width/2 + inner_radius * cos(2 * PI * i / num_points), height/2 + inner_radius * sin(2 * PI * i / num_points)));
+		points.push(new Point(width/2 + outer_radius * cos(2 * PI * i / num_points), height/2 + outer_radius * sin(2 * PI * i / num_points)));
 	}
-	points.push(new Point(CANVAS_SIZE/2, CANVAS_SIZE/2));
+	points.push(new Point(width/2, height/2));
 	let centre = points[points.length - 1];
 	// Springs
 	for (var i = 0; i < num_points; i++) {
