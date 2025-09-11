@@ -193,13 +193,13 @@ function updateObstacleDynamics() {
 			let dx = b.x - a.x;
 			let dy = b.y - a.y;
 			let d2 = dx*dx + dy*dy;
-			let rsum = a.r + b.r;
-			if (d2 <= (rsum*rsum)) {
+			let rsumBand = a.r + b.r + OBSTACLE_CONTACT_BAND;
+			if (d2 <= (rsumBand*rsumBand)) {
 				let d = sqrt(d2) + 1e-6;
 				let nx = dx / d, ny = dy / d;
-				let overlap = (rsum - d);
+				let overlap = (rsumBand + OBSTACLE_SEPARATION_EPS - d);
 				let relVn = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
-				let fmag = OBSTACLE_CONTACT_REPEL_K * overlap - OBSTACLE_CONTACT_DAMP * relVn;
+				let fmag = OBSTACLE_CONTACT_REPEL_K * max(0, overlap) - OBSTACLE_CONTACT_DAMP * relVn;
 				if (fmag > OBSTACLE_MAX_PAIR_FORCE) fmag = OBSTACLE_MAX_PAIR_FORCE;
 				if (fmag < -OBSTACLE_MAX_PAIR_FORCE) fmag = -OBSTACLE_MAX_PAIR_FORCE;
 				let fx = fmag * nx;
@@ -261,13 +261,13 @@ function updateObstacleDynamicsMulti() {
 			let dx = b.x - a.x;
 			let dy = b.y - a.y;
 			let d2 = dx*dx + dy*dy;
-			let rsum = a.r + b.r;
-			if (d2 <= (rsum*rsum)) {
+			let rsumBand = a.r + b.r + OBSTACLE_CONTACT_BAND;
+			if (d2 <= (rsumBand*rsumBand)) {
 				let d = sqrt(d2) + 1e-6;
 				let nx = dx / d, ny = dy / d;
-				let overlap = (rsum - d);
+				let overlap = (rsumBand + OBSTACLE_SEPARATION_EPS - d);
 				let relVn = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
-				let fmag = OBSTACLE_CONTACT_REPEL_K * overlap - OBSTACLE_CONTACT_DAMP * relVn;
+				let fmag = OBSTACLE_CONTACT_REPEL_K * max(0, overlap) - OBSTACLE_CONTACT_DAMP * relVn;
 				if (fmag > OBSTACLE_MAX_PAIR_FORCE) fmag = OBSTACLE_MAX_PAIR_FORCE;
 				if (fmag < -OBSTACLE_MAX_PAIR_FORCE) fmag = -OBSTACLE_MAX_PAIR_FORCE;
 				let fx = fmag * nx;

@@ -49,10 +49,13 @@ let OBSTACLE_DAMPING = 3.5;
 let CONTACT_FORCE_FACTOR = 0.25;
 
 // Obstacle-obstacle contact (repel like weak magnets)
-let OBSTACLE_CONTACT_REPEL_K = 800;      // spring-like repel strength on overlap
+let OBSTACLE_CONTACT_REPEL_K_BASE = 800; // base spring-like repel strength
+let OBSTACLE_CONTACT_REPEL_K = OBSTACLE_CONTACT_REPEL_K_BASE; // runtime value (scaled by UI)
 let OBSTACLE_CONTACT_DAMP = 25;          // normal damping to reduce jitter
 let OBSTACLE_SEPARATION_EPS = 0.5;       // small bias to keep a gap after correction (px)
-let OBSTACLE_MAX_PAIR_FORCE = 4000;      // clamp per-pair force magnitude
+let OBSTACLE_MAX_PAIR_FORCE_BASE = 4000; // base clamp per-pair force magnitude
+let OBSTACLE_MAX_PAIR_FORCE = OBSTACLE_MAX_PAIR_FORCE_BASE; // runtime clamp (scaled by UI)
+let OBSTACLE_CONTACT_BAND = 12;          // pixels beyond touch where repulsion acts
 
 // Obstacle trail visualization
 let OBSTACLE_TRAIL_ENABLED = true;

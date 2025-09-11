@@ -5,11 +5,24 @@ let draggingBlob = false;
 let draggedPointIndex = -1;
 let draggedBlobIndex = -1;
 let SPAWN_PAUSED = false;
+let hiddenObstaclesBackup = [];
 
 function handleGlobalKeydown(e) {
 	if (e.code === 'Space' || e.key === ' ' || e.keyCode === 32) {
 		SPAWN_PAUSED = !SPAWN_PAUSED;
-		obstacles = [];
+		if (SPAWN_PAUSED) {
+			// Hide obstacles by stashing current list
+			if (obstacles && obstacles.length > 0) {
+				hiddenObstaclesBackup = obstacles;
+				obstacles = [];
+			}
+		} else {
+			// Restore previously hidden obstacles
+			if ((!obstacles || obstacles.length === 0) && hiddenObstaclesBackup && hiddenObstaclesBackup.length > 0) {
+				obstacles = hiddenObstaclesBackup;
+				hiddenObstaclesBackup = [];
+			}
+		}
 		e.preventDefault();
 	}
 }
@@ -94,6 +107,16 @@ function spawnObstacleBelow() {
 	let x = random(rr, max(rr + 1, width - rr));
 	let y = height + rr + random(CANVAS_SIZE * 0.1, CANVAS_SIZE * 0.6);
 	return new ObstacleCircle(x, y, rr);
+}
+
+function spawnObstacleInView() {
+    let rmin = CANVAS_SIZE / 24;
+    let rmax = CANVAS_SIZE / 6;
+    let rr = random(rmin, rmax);
+    // Ensure obstacle fully inside viewport horizontally and vertically
+    let x = random(rr, max(rr + 1, width - rr));
+    let y = random(rr, max(rr + 1, height - rr));
+    return new ObstacleCircle(x, y, rr);
 }
 
 function recycleObstacles() {

@@ -1,6 +1,6 @@
 // UI elements
-let rSlider, vertexSlider, gravitySlider, densitySlider, fillColorSlider, fillOpacitySlider, thicknessSlider, frictionSlider, obstacleDensitySlider, obstacleSpawnRateSlider;
-let rLabel, vertexLabel, gravityLabel, densityLabel, thicknessLabel, fillLabel, fillOpacityLabel, frictionLabel, obstacleDensityLabel, obstacleSpawnRateLabel;
+let rSlider, vertexSlider, gravitySlider, densitySlider, fillColorSlider, fillOpacitySlider, thicknessSlider, frictionSlider, obstacleDensitySlider, obstacleSpawnRateSlider, obstacleRepelSlider;
+let rLabel, vertexLabel, gravityLabel, densityLabel, thicknessLabel, fillLabel, fillOpacityLabel, frictionLabel, obstacleDensityLabel, obstacleSpawnRateLabel, obstacleRepelLabel;
 let uiPanel;
 let fillCheckbox, rimCheckbox, wireCheckbox, pointsCheckbox, solidCheckbox, trailCheckbox;
 let BASE_NUM_POINTS;
@@ -34,7 +34,7 @@ function instantiateNewSoftBody(cx, cy) {
 
 function setup() {
 	frameRate(FRAME);
-	createCanvas(1200, 800);
+	createCanvas(windowWidth, windowHeight);
 	textSize(15);
 	uiPanel = createDiv('');
 	uiPanel.position(8, 8);
@@ -84,6 +84,11 @@ function setup() {
 	obstacleSpawnRateSlider.position(20, _y); _y += SLIDER_GAP;
 	styleSlider(obstacleSpawnRateSlider);
 
+	// INSERTED: obstacle repulsion strength slider (0.0x - 3.0x, default 1.0x)
+	obstacleRepelSlider = createSlider(0.0, 3.0, 1.0, 0.01);
+	obstacleRepelSlider.position(20, _y); _y += SLIDER_GAP;
+	styleSlider(obstacleRepelSlider);
+
 	rLabel = createDiv('red');
 	styleLabel(rLabel);
 	rLabel.position(rSlider.x + rSlider.width + 16, rSlider.y - 4);
@@ -118,32 +123,40 @@ function setup() {
 	styleLabel(obstacleSpawnRateLabel);
 	obstacleSpawnRateLabel.position(obstacleSpawnRateSlider.x + obstacleSpawnRateSlider.width + 16, obstacleSpawnRateSlider.y - 4);
 
+	// INSERTED: obstacle repulsion label
+	obstacleRepelLabel = createDiv('repel 1.00x');
+	styleLabel(obstacleRepelLabel);
+	obstacleRepelLabel.position(obstacleRepelSlider.x + obstacleRepelSlider.width + 16, obstacleRepelSlider.y - 4);
+
+	// Place checkboxes below the last slider to avoid overlap
+	const CHECKBOX_GAP = 25;
+	let checkboxY = _y + 12;
 	fillCheckbox = createCheckbox('Display blob fill', false);
-	fillCheckbox.position(20, 300);
+	fillCheckbox.position(20, checkboxY); checkboxY += CHECKBOX_GAP;
 	styleCheckbox(fillCheckbox);
 	rimCheckbox = createCheckbox('Display blob border rim', false);
-	rimCheckbox.position(20, 325);
+	rimCheckbox.position(20, checkboxY); checkboxY += CHECKBOX_GAP;
 	styleCheckbox(rimCheckbox);
 	wireCheckbox = createCheckbox('Display blob wire-frame', false);
-	wireCheckbox.position(20, 350);
+	wireCheckbox.position(20, checkboxY); checkboxY += CHECKBOX_GAP;
 	styleCheckbox(wireCheckbox);
 	pointsCheckbox = createCheckbox('Display mesh points', false);
-	pointsCheckbox.position(20, 375);
+	pointsCheckbox.position(20, checkboxY); checkboxY += CHECKBOX_GAP;
 	styleCheckbox(pointsCheckbox);
 	solidCheckbox = createCheckbox('Display blob solid interior', true);
-	solidCheckbox.position(20, 400);
+	solidCheckbox.position(20, checkboxY); checkboxY += CHECKBOX_GAP;
 	styleCheckbox(solidCheckbox);
 	trailCheckbox = createCheckbox('Display obstacle trails', false);
-	trailCheckbox.position(20, 425);
+	trailCheckbox.position(20, checkboxY); checkboxY += CHECKBOX_GAP;
 	styleCheckbox(trailCheckbox);
 
 	BASE_NUM_POINTS = num_points;
 	softBody = new SoftBody(inner_radius, outer_radius, num_points);
 	softBody.initializeGeometry();
 	obstacles = [
-		new ObstacleCircle(CANVAS_SIZE/3, CANVAS_SIZE, CANVAS_SIZE/8),
-		new ObstacleCircle(3*CANVAS_SIZE/3, CANVAS_SIZE, CANVAS_SIZE/16),
-		new ObstacleCircle(CANVAS_SIZE*3.5/4, CANVAS_SIZE*2/3, CANVAS_SIZE/20)
+		spawnObstacleInView(),
+		spawnObstacleInView(),
+		spawnObstacleInView()
 	];
 	window.addEventListener('keydown', handleGlobalKeydown);
 }
@@ -185,6 +198,12 @@ function draw() {
 		draggingBlob = false;
 		draggedPointIndex = -1;
 	}
+	// Update obstacle repulsion parameters from UI slider each frame BEFORE physics
+	if (typeof obstacleRepelSlider !== 'undefined') {
+		let scale = obstacleRepelSlider.value();
+		OBSTACLE_CONTACT_REPEL_K = OBSTACLE_CONTACT_REPEL_K_BASE * scale;
+		OBSTACLE_MAX_PAIR_FORCE = OBSTACLE_MAX_PAIR_FORCE_BASE * max(0.2, scale);
+	}
 	updatePhysics();
 	applyGlobalScroll();
 	recycleObstacles();
@@ -197,6 +216,7 @@ function draw() {
 	if (obstacleDensityLabel && obstacleDensitySlider) obstacleDensityLabel.html('obstacle density ' + obstacleDensitySlider.value().toFixed(2) + 'x');
 	if (fillOpacityLabel && fillOpacitySlider) fillOpacityLabel.html('fill opacity ' + (fillOpacitySlider.value()/100).toFixed(2));
 	if (obstacleSpawnRateLabel && obstacleSpawnRateSlider) obstacleSpawnRateLabel.html('nucleation ' + (obstacleSpawnRateSlider.value()).toFixed(2) + 'x');
+	if (obstacleRepelLabel && obstacleRepelSlider) obstacleRepelLabel.html('repel ' + (obstacleRepelSlider.value()).toFixed(2) + 'x');
 }
 
 function keyPressed() {
@@ -289,4 +309,8 @@ function drawObjects() {
 	}
 }
 
+
+function windowResized() {
+	resizeCanvas(windowWidth, windowHeight);
+}
 
