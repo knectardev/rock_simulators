@@ -34,20 +34,40 @@ let SELF_REPEL_STRENGTH = 15000;
 let SELF_REPEL_RADIUS = CANVAS_SIZE / 40 * 1.6; // updated when thickness changes
 let BENDING_K = 150;
 let BEND_SPRING_K = 800;
-let VISC_BEND_COEF = 0.25;
+let VISC_BEND_COEF = 0.35;
+let REBUILD_FREEZE_FRAMES = 1; // freeze physics for a frame after vertex rebuild
 
 // Safety clamps
 let MAX_PRESSURE_FORCE = 2500;
 let MAX_EXTRA_FORCE = 6000;
 let CONTACT_BAND = 8;
+let MAX_POINT_SPEED = 800; // px/sec cap to prevent flicker
 
 // Obstacles
 let OBSTACLE_DENSITY = 0.005;
 let OBSTACLE_DAMPING = 3.5;
 let CONTACT_FORCE_FACTOR = 0.25;
 
+// Obstacle-obstacle contact (repel like weak magnets)
+let OBSTACLE_CONTACT_REPEL_K = 800;      // spring-like repel strength on overlap
+let OBSTACLE_CONTACT_DAMP = 25;          // normal damping to reduce jitter
+let OBSTACLE_SEPARATION_EPS = 0.5;       // small bias to keep a gap after correction (px)
+let OBSTACLE_MAX_PAIR_FORCE = 4000;      // clamp per-pair force magnitude
+
+// Obstacle trail visualization
+let OBSTACLE_TRAIL_ENABLED = true;
+const OBSTACLE_TRAIL_MAX_POINTS = 300;
+const OBSTACLE_TRAIL_MIN_DIST = 3; // pixels between stored points
+const OBSTACLE_TRAIL_ALPHA = 90;   // 0-255
+const OBSTACLE_TRAIL_POINT_SIZE = 3; // px
+
 // Blob mass scaling
 let BLOB_MASS_PER_AREA = 0.002;
+
+// Blob splitting behavior
+let ENABLE_BLOB_SPLIT_ON_PENETRATION = true;
+const BLOB_SPLIT_COOLDOWN = 0.8; // seconds
+const BLOB_SPLIT_SCALE = 0.5; // half size
 
 // Force visualization
 const FORCE_VIS_SCALE = 0.03;

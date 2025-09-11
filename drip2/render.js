@@ -12,72 +12,98 @@ function drawSpokeToHub(x1, y1, cx, cy) {
 	line(x1, y1, hx, hy);
 }
 
-function drawHub() {
+function drawHub(cx, cy) {
 	push();
 	noStroke();
 	fill(0, 200);
-	let c = points[points.length - 1];
-	circle(c.x, c.y, HUB_RADIUS * 2);
+	circle(cx, cy, HUB_RADIUS * 2);
 	pop();
 }
 
 function drawRimFill() {
-	push();
-	noStroke();
-	fill(BLOB_FILL_GRAY, BLOB_FILL_GRAY, BLOB_FILL_GRAY, 128);
-	beginShape(TRIANGLE_STRIP);
-	for (var i = 0; i <= num_points; i++) {
-		let idx = i % num_points;
-		let o = points[2 * idx + 1];
-		let inn = points[2 * idx];
-		vertex(o.x, o.y);
-		vertex(inn.x, inn.y);
+	if (typeof blobs !== 'undefined' && blobs.length > 0) {
+		for (var b = 0; b < blobs.length; b++) {
+			let blob = blobs[b];
+			push();
+			noStroke();
+			let a = (typeof window !== 'undefined' && typeof window.__blobFillAlpha === 'number') ? window.__blobFillAlpha : 204;
+			fill(BLOB_FILL_GRAY, BLOB_FILL_GRAY, BLOB_FILL_GRAY, a);
+			beginShape(TRIANGLE_STRIP);
+			for (var i = 0; i <= blob.vertexCount; i++) {
+				let idx = i % blob.vertexCount;
+				let o = blob.points[2 * idx + 1];
+				let inn = blob.points[2 * idx];
+				vertex(o.x, o.y);
+				vertex(inn.x, inn.y);
+			}
+			endShape(CLOSE);
+			pop();
+		}
 	}
-	endShape(CLOSE);
-	pop();
 }
 
 function drawSolidFill() {
-	push();
-	noStroke();
-	fill(BLOB_FILL_GRAY);
-	beginShape();
-	for (var i = 0; i < num_points; i++) {
-		let o = points[2 * i + 1];
-		vertex(o.x, o.y);
+	if (typeof blobs !== 'undefined' && blobs.length > 0) {
+		for (var b = 0; b < blobs.length; b++) {
+			let blob = blobs[b];
+			push();
+			noStroke();
+			let a2 = (typeof window !== 'undefined' && typeof window.__blobFillAlpha === 'number') ? window.__blobFillAlpha : 204;
+			fill(BLOB_FILL_GRAY, BLOB_FILL_GRAY, BLOB_FILL_GRAY, a2);
+			beginShape();
+			for (var i = 0; i < blob.vertexCount; i++) {
+				let o = blob.points[2 * i + 1];
+				vertex(o.x, o.y);
+			}
+			endShape(CLOSE);
+			pop();
+		}
 	}
-	endShape(CLOSE);
-	pop();
 }
 
 function drawForceVectors() {
 	push();
 	stroke(0, 255, 0);
 	fill(0, 255, 0);
-	let c = points[points.length - 1];
-	let sumFx = 0, sumFy = 0;
-	for (var i = 0; i < points.length; i++) {
-		sumFx += points[i].ax;
-		sumFy += points[i].ay;
+	if (typeof blobs !== 'undefined' && blobs.length > 0) {
+		for (var b = 0; b < blobs.length; b++) {
+			let blob = blobs[b];
+			let c = blob.points[blob.points.length - 1];
+			let sumFx = 0, sumFy = 0;
+			for (var i = 0; i < blob.points.length; i++) {
+				sumFx += blob.points[i].ax;
+				sumFy += blob.points[i].ay;
+			}
+			blob.blobVisFx = (1 - BLOB_FORCE_EMA) * blob.blobVisFx + BLOB_FORCE_EMA * sumFx;
+			blob.blobVisFy = (1 - BLOB_FORCE_EMA) * blob.blobVisFy + BLOB_FORCE_EMA * sumFy;
+			let blen = sqrt(blob.blobVisFx*blob.blobVisFx + blob.blobVisFy*blob.blobVisFy);
+			let bs = blen * FORCE_VIS_SCALE;
+			if (bs > FORCE_VIS_MAX_LEN) bs = FORCE_VIS_MAX_LEN;
+			let bux = blen > 0 ? (blob.blobVisFx / blen) : 0;
+			let buy = blen > 0 ? (blob.blobVisFy / blen) : 0;
+			let bx2 = c.x + bux * bs;
+			let by2 = c.y + buy * bs;
+			line(c.x, c.y, bx2, by2);
+			let ahx1 = bx2 - bux * ARROW_HEAD_SIZE + (-buy) * (ARROW_HEAD_SIZE * 0.6);
+			let ahy1 = by2 - buy * ARROW_HEAD_SIZE + (bux) * (ARROW_HEAD_SIZE * 0.6);
+			let ahx2 = bx2 - bux * ARROW_HEAD_SIZE - (-buy) * (ARROW_HEAD_SIZE * 0.6);
+			let ahy2 = by2 - buy * ARROW_HEAD_SIZE - (bux) * (ARROW_HEAD_SIZE * 0.6);
+			line(bx2, by2, ahx1, ahy1);
+			line(bx2, by2, ahx2, ahy2);
+		}
 	}
-	blobVisFx = (1 - BLOB_FORCE_EMA) * blobVisFx + BLOB_FORCE_EMA * sumFx;
-	blobVisFy = (1 - BLOB_FORCE_EMA) * blobVisFy + BLOB_FORCE_EMA * sumFy;
-	let blen = sqrt(blobVisFx*blobVisFx + blobVisFy*blobVisFy);
-	let bs = blen * FORCE_VIS_SCALE;
-	if (bs > FORCE_VIS_MAX_LEN) bs = FORCE_VIS_MAX_LEN;
-	let bux = blen > 0 ? (blobVisFx / blen) : 0;
-	let buy = blen > 0 ? (blobVisFy / blen) : 0;
-	let bx2 = c.x + bux * bs;
-	let by2 = c.y + buy * bs;
-	line(c.x, c.y, bx2, by2);
-	let ahx1 = bx2 - bux * ARROW_HEAD_SIZE + (-buy) * (ARROW_HEAD_SIZE * 0.6);
-	let ahy1 = by2 - buy * ARROW_HEAD_SIZE + (bux) * (ARROW_HEAD_SIZE * 0.6);
-	let ahx2 = bx2 - bux * ARROW_HEAD_SIZE - (-buy) * (ARROW_HEAD_SIZE * 0.6);
-	let ahy2 = by2 - buy * ARROW_HEAD_SIZE - (bux) * (ARROW_HEAD_SIZE * 0.6);
-	line(bx2, by2, ahx1, ahy1);
-	line(bx2, by2, ahx2, ahy2);
 	for (var i = 0; i < obstacles.length; i++) {
 		let o = obstacles[i];
+		// Draw faint trail of obstacle motion
+		if ((typeof trailCheckbox === 'undefined' ? OBSTACLE_TRAIL_ENABLED : trailCheckbox.checked()) && o.trail && o.trail.length > 1) {
+			push();
+			noStroke();
+			fill(255, 255, 255, OBSTACLE_TRAIL_ALPHA);
+			for (var t = 0; t < o.trail.length; t++) {
+				circle(o.trail[t].x, o.trail[t].y, OBSTACLE_TRAIL_POINT_SIZE);
+			}
+			pop();
+		}
 		let ofx = o.ax * o.mass;
 		let ofy = o.ay * o.mass;
 		let olen = sqrt(ofx*ofx + ofy*ofy);

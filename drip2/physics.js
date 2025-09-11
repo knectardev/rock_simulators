@@ -2,6 +2,8 @@
 let points = [];
 let springs = [];
 let obstacles = [];
+let blobs = [];
+let lastSplitAt = 0;
 
 function normalizeVec2(p) {
 	let m = sqrt(p[0] * p[0] + p[1] * p[1]);
@@ -36,39 +38,76 @@ function getDensityScale() {
 }
 
 function updatePhysics() {
-	for (var i = 0; i < points.length; i++) {
-		points[i].ax = 0;
-		let gscale = gravitySlider ? gravitySlider.value() : 1;
-		let dscale = getDensityScale();
-		points[i].ay = BASE_GRAVITY * gscale / dscale;
-		let sdf_a = sdf_force([points[i].x, points[i].y]);
-		points[i].ax += sdf_a[0];
-		points[i].ay += sdf_a[1];
+    if (window.__freezeFrames && window.__freezeFrames > 0) {
+        window.__freezeFrames--;
+        return;
+    }
+	for (var b = 0; b < blobs.length; b++) {
+		let blob = blobs[b];
+		let bp = blob.points;
+		let bs = blob.springs;
+		for (var i = 0; i < bp.length; i++) {
+			// Sanity guard against NaN/Inf in positions and velocities
+			if (!isFinite(bp[i].x) || !isFinite(bp[i].y) || !isFinite(bp[i].vx) || !isFinite(bp[i].vy)) {
+				let cguard = bp[bp.length - 1];
+				bp[i].x = cguard.x;
+				bp[i].y = cguard.y;
+				bp[i].vx = 0;
+				bp[i].vy = 0;
+			}
+			bp[i].ax = 0;
+			let gscale = gravitySlider ? gravitySlider.value() : 1;
+			let dscale = getDensityScale();
+			bp[i].ay = BASE_GRAVITY * gscale / dscale;
+			let sdf_a = sdf_force([bp[i].x, bp[i].y]);
+			bp[i].ax += sdf_a[0];
+			bp[i].ay += sdf_a[1];
+		}
+		for (var s = 0; s < bs.length; s++) {
+			bs[s].addAcceleration();
+		}
+		applyPressureForcesForBlob(blob);
+		applyRimSelfRepulsionForBlob(blob);
+		applyRimBendingForBlob(blob);
+		applyRimVelocitySmoothingForBlob(blob);
+		// Post-force clamp to avoid runaway accelerations per point
+		for (var ci = 0; ci < bp.length; ci++) {
+			let amag = Math.sqrt(bp[ci].ax*bp[ci].ax + bp[ci].ay*bp[ci].ay);
+			if (amag > MAX_EXTRA_FORCE) {
+				let s = MAX_EXTRA_FORCE / (amag + 1e-9);
+				bp[ci].ax *= s;
+				bp[ci].ay *= s;
+			}
+		}
+	}
+	applyObstacleFrictionMulti();
+	updateObstacleDynamicsMulti();
+	if (draggingBlob && typeof draggedBlobIndex === 'number' && draggedBlobIndex >= 0 && draggedPointIndex >= 0 && draggedBlobIndex < blobs.length) {
+		applyDistributedMouseTugForBlob(blobs[draggedBlobIndex], draggedPointIndex);
+	}
+	for (var b2 = 0; b2 < blobs.length; b2++) {
+		let bp2 = blobs[b2].points;
+		for (var i2 = 0; i2 < bp2.length; i2++) {
+			let damp = 1.5;
+			bp2[i2].vx += bp2[i2].ax * RATE;
+			bp2[i2].vy += bp2[i2].ay * RATE;
+			// Velocity clamp
+			let spd = Math.sqrt(bp2[i2].vx*bp2[i2].vx + bp2[i2].vy*bp2[i2].vy);
+			if (spd > MAX_POINT_SPEED) {
+				let s = MAX_POINT_SPEED / (spd + 1e-9);
+				bp2[i2].vx *= s;
+				bp2[i2].vy *= s;
+			}
+			bp2[i2].vx *= exp(damp * -RATE);
+			bp2[i2].vy *= exp(damp * -RATE);
+			bp2[i2].x += bp2[i2].vx * RATE;
+			bp2[i2].y += bp2[i2].vy * RATE;
+		}
 	}
 
-	for (var s = 0; s < springs.length; s++) {
-		springs[s].addAcceleration();
-	}
-
-	applyPressureForces();
-	applyRimSelfRepulsion();
-	applyRimBending();
-	applyRimVelocitySmoothing();
-	applyObstacleFriction();
-	updateObstacleDynamics();
-
-	if (draggingBlob && draggedPointIndex >= 0) {
-		applyDistributedMouseTug(draggedPointIndex);
-	}
-
-	for (var i2 = 0; i2 < points.length; i2++) {
-		let damp = 1;
-		points[i2].vx += points[i2].ax * RATE;
-		points[i2].vy += points[i2].ay * RATE;
-		points[i2].vx *= exp(damp * -RATE);
-		points[i2].vy *= exp(damp * -RATE);
-		points[i2].x += points[i2].vx * RATE;
-		points[i2].y += points[i2].vy * RATE;
+	// After integration, check for obstacle penetration and split if needed
+	if (ENABLE_BLOB_SPLIT_ON_PENETRATION) {
+		maybeSplitPenetratedBlobs();
 	}
 }
 
@@ -97,6 +136,12 @@ function sdfCircle(p, o, r) {
 
 function computeBlobMass() {
 	let area = abs(computeOuterArea());
+	let density = getDensityScale();
+	return max(1, area * BLOB_MASS_PER_AREA * density);
+}
+
+function computeBlobMassForBlob(blob) {
+	let area = abs(computeOuterAreaForBlob(blob));
 	let density = getDensityScale();
 	return max(1, area * BLOB_MASS_PER_AREA * density);
 }
@@ -141,6 +186,29 @@ function updateObstacleDynamics() {
 			}
 		}
 	}
+	// Pairwise obstacle repulsion (pre-integration forces)
+	for (let i = 0; i < obstacles.length; i++) {
+		for (let j = i + 1; j < obstacles.length; j++) {
+			let a = obstacles[i], b = obstacles[j];
+			let dx = b.x - a.x;
+			let dy = b.y - a.y;
+			let d2 = dx*dx + dy*dy;
+			let rsum = a.r + b.r;
+			if (d2 <= (rsum*rsum)) {
+				let d = sqrt(d2) + 1e-6;
+				let nx = dx / d, ny = dy / d;
+				let overlap = (rsum - d);
+				let relVn = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
+				let fmag = OBSTACLE_CONTACT_REPEL_K * overlap - OBSTACLE_CONTACT_DAMP * relVn;
+				if (fmag > OBSTACLE_MAX_PAIR_FORCE) fmag = OBSTACLE_MAX_PAIR_FORCE;
+				if (fmag < -OBSTACLE_MAX_PAIR_FORCE) fmag = -OBSTACLE_MAX_PAIR_FORCE;
+				let fx = fmag * nx;
+				let fy = fmag * ny;
+				a.applyForce(-fx, -fy);
+				b.applyForce( fx,  fy);
+			}
+		}
+	}
 	for (var m = 0; m < obstacles.length; m++) {
 		let o = obstacles[m];
 		o.vx += o.ax * RATE;
@@ -149,6 +217,154 @@ function updateObstacleDynamics() {
 		o.vy *= exp(-OBSTACLE_DAMPING * RATE);
 		o.x += o.vx * RATE;
 		o.y += o.vy * RATE;
+		if (typeof o.updateTrail === 'function') o.updateTrail();
+	}
+	// Post-integration positional separation to prevent overlap lingering
+	for (let i = 0; i < obstacles.length; i++) {
+		for (let j = i + 1; j < obstacles.length; j++) {
+			let a = obstacles[i], b = obstacles[j];
+			let dx = b.x - a.x;
+			let dy = b.y - a.y;
+			let d2 = dx*dx + dy*dy;
+			let rsum = a.r + b.r + OBSTACLE_SEPARATION_EPS;
+			if (d2 < (rsum*rsum)) {
+				let d = sqrt(d2) + 1e-6;
+				let nx = dx / d, ny = dy / d;
+				let push = (rsum - d);
+				let invMa = 1 / max(1e-6, a.mass);
+				let invMb = 1 / max(1e-6, b.mass);
+				let invSum = invMa + invMb;
+				let ca = (invMa / invSum) * push;
+				let cb = (invMb / invSum) * push;
+				a.x -= nx * ca;
+				a.y -= ny * ca;
+				b.x += nx * cb;
+				b.y += ny * cb;
+			}
+		}
+	}
+}
+
+function updateObstacleDynamicsMulti() {
+	if (obstacles.length === 0) return;
+	for (var k = 0; k < obstacles.length; k++) {
+		obstacles[k].ax = 0;
+		obstacles[k].ay = 0;
+		if (obstacleDensitySlider) {
+			obstacles[k].mass = max(1, PI * obstacles[k].r * obstacles[k].r * OBSTACLE_DENSITY * obstacleDensitySlider.value());
+		}
+	}
+	// Pairwise obstacle repulsion (pre-integration forces)
+	for (let i = 0; i < obstacles.length; i++) {
+		for (let j = i + 1; j < obstacles.length; j++) {
+			let a = obstacles[i], b = obstacles[j];
+			let dx = b.x - a.x;
+			let dy = b.y - a.y;
+			let d2 = dx*dx + dy*dy;
+			let rsum = a.r + b.r;
+			if (d2 <= (rsum*rsum)) {
+				let d = sqrt(d2) + 1e-6;
+				let nx = dx / d, ny = dy / d;
+				let overlap = (rsum - d);
+				let relVn = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
+				let fmag = OBSTACLE_CONTACT_REPEL_K * overlap - OBSTACLE_CONTACT_DAMP * relVn;
+				if (fmag > OBSTACLE_MAX_PAIR_FORCE) fmag = OBSTACLE_MAX_PAIR_FORCE;
+				if (fmag < -OBSTACLE_MAX_PAIR_FORCE) fmag = -OBSTACLE_MAX_PAIR_FORCE;
+				let fx = fmag * nx;
+				let fy = fmag * ny;
+				a.applyForce(-fx, -fy);
+				b.applyForce( fx,  fy);
+			}
+		}
+	}
+	let mu = frictionSlider ? frictionSlider.value() : 0;
+	if (mu > 0) {
+		for (var b = 0; b < blobs.length; b++) {
+			let blob = blobs[b];
+			let blobMass = computeBlobMassForBlob(blob);
+			for (var i = 0; i < blob.vertexCount; i++) {
+				let p = blob.points[2 * i + 1];
+				let nearest = null;
+				let minDist = 1e9;
+				for (var j = 0; j < obstacles.length; j++) {
+					let o = obstacles[j];
+					let d = sqrt((p.x - o.x)*(p.x - o.x) + (p.y - o.y)*(p.y - o.y)) - o.r;
+					if (d < minDist) { minDist = d; nearest = o; }
+				}
+				if (!nearest) continue;
+				// If obstacle is attached, skip friction forces here
+				if (nearest.attachedBlobIndex >= 0) continue;
+				if (minDist < CONTACT_BAND) {
+					let dx = p.x - nearest.x;
+					let dy = p.y - nearest.y;
+					let len = sqrt(dx*dx + dy*dy) + 1e-6;
+					let nx = dx / len, ny = dy / len;
+					let tx = -ny, ty = nx;
+					let vt = p.vx * tx + p.vy * ty;
+					let proximity = 1 - max(0, minDist) / CONTACT_BAND;
+					let mag = CONTACT_FORCE_FACTOR * blobMass * mu * vt * proximity;
+					let clampF = MAX_EXTRA_FORCE;
+					let fx = -mag * tx;
+					let fy = -mag * ty;
+					let fm = sqrt(fx*fx + fy*fy);
+					if (fm > clampF) { let s = clampF / (fm + 1e-6); fx *= s; fy *= s; }
+					nearest.applyForce(fx, fy);
+				}
+			}
+		}
+	}
+	// Attach obstacles to child blobs if they are inside
+	for (var oidx = 0; oidx < obstacles.length; oidx++) {
+		let o = obstacles[oidx];
+		if (o.attachedBlobIndex >= 0) continue;
+		for (var bb = 0; bb < blobs.length; bb++) {
+			if (!blobs[bb].isChild) continue;
+			if (obstaclePenetratesBlob(blobs[bb], o)) {
+				o.attachedBlobIndex = bb;
+				break;
+			}
+		}
+	}
+	for (var m = 0; m < obstacles.length; m++) {
+		let o = obstacles[m];
+		if (o.attachedBlobIndex >= 0 && o.attachedBlobIndex < blobs.length) {
+			let cb = blobs[o.attachedBlobIndex];
+			let ctr = cb.points[cb.points.length - 1];
+			let kattach = 10.0;
+			o.ax += kattach * (ctr.x - o.x);
+			o.ay += kattach * (ctr.y - o.y);
+		}
+		o.vx += o.ax * RATE;
+		o.vy += o.ay * RATE;
+		o.vx *= exp(-OBSTACLE_DAMPING * RATE);
+		o.vy *= exp(-OBSTACLE_DAMPING * RATE);
+		o.x += o.vx * RATE;
+		o.y += o.vy * RATE;
+		if (typeof o.updateTrail === 'function') o.updateTrail();
+	}
+	// Post-integration positional separation to prevent overlap lingering
+	for (let i = 0; i < obstacles.length; i++) {
+		for (let j = i + 1; j < obstacles.length; j++) {
+			let a = obstacles[i], b = obstacles[j];
+			let dx = b.x - a.x;
+			let dy = b.y - a.y;
+			let d2 = dx*dx + dy*dy;
+			let rsum = a.r + b.r + OBSTACLE_SEPARATION_EPS;
+			if (d2 < (rsum*rsum)) {
+				let d = sqrt(d2) + 1e-6;
+				let nx = dx / d, ny = dy / d;
+				let push = (rsum - d);
+				let invMa = 1 / max(1e-6, a.mass);
+				let invMb = 1 / max(1e-6, b.mass);
+				let invSum = invMa + invMb;
+				let ca = (invMa / invSum) * push;
+				let cb = (invMb / invSum) * push;
+				a.x -= nx * ca;
+				a.y -= ny * ca;
+				b.x += nx * cb;
+				b.y += ny * cb;
+			}
+		}
 	}
 }
 
@@ -182,6 +398,43 @@ function applyObstacleFriction() {
 			if (fmag < -maxF) fmag = -maxF;
 			p.ax += fmag * tx;
 			p.ay += fmag * ty;
+		}
+	}
+}
+
+function applyObstacleFrictionMulti() {
+	if (!frictionSlider || obstacles.length === 0) return;
+	let mu = frictionSlider.value();
+	if (mu <= 0) return;
+	for (var b = 0; b < blobs.length; b++) {
+		let blob = blobs[b];
+		for (var i = 0; i < blob.vertexCount; i++) {
+			let p = blob.points[2 * i + 1];
+			let nearest = null;
+			let minDist = 1e9;
+			for (var j = 0; j < obstacles.length; j++) {
+				let o = obstacles[j];
+				let d = sqrt((p.x - o.x)*(p.x - o.x) + (p.y - o.y)*(p.y - o.y)) - o.r;
+				if (d < minDist) { minDist = d; nearest = o; }
+			}
+			if (!nearest) continue;
+			if (minDist < CONTACT_BAND) {
+				let dx = p.x - nearest.x;
+				let dy = p.y - nearest.y;
+				let len = sqrt(dx*dx + dy*dy) + 1e-6;
+				let nx = dx / len;
+				let ny = dy / len;
+				let tx = -ny;
+				let ty = nx;
+				let vt = p.vx * tx + p.vy * ty;
+				let proximity = 1 - max(0, minDist) / CONTACT_BAND;
+				let fmag = -mu * vt * proximity;
+				let maxF = MAX_EXTRA_FORCE * 0.4;
+				if (fmag >  maxF) fmag =  maxF;
+				if (fmag < -maxF) fmag = -maxF;
+				p.ax += fmag * tx;
+				p.ay += fmag * ty;
+			}
 		}
 	}
 }
@@ -226,6 +479,47 @@ function applyMouseSpringNormalized(pointIndex, share, totalShare) {
 	p.ay += fy;
 }
 
+// Multi-blob mouse tug helpers
+function applyDistributedMouseTugForBlob(blob, baseIndex) {
+    let isOuter = (baseIndex % 2) === 1;
+    let v = Math.floor(baseIndex / 2);
+    let indices = [];
+    let shares = [];
+    let totalShare = 0;
+    for (let k = -DRAG_NEIGHBOR_RANGE; k <= DRAG_NEIGHBOR_RANGE; k++) {
+        let baseW = Math.pow(DRAG_NEIGHBOR_DECAY, Math.abs(k));
+        let j = (v + k + blob.vertexCount) % blob.vertexCount;
+        let idxPrimary = isOuter ? (2 * j + 1) : (2 * j);
+        let idxPair = isOuter ? (2 * j) : (2 * j + 1);
+        let wPrimary = baseW;
+        let wPair = DRAG_PAIR_WEIGHT * baseW;
+        indices.push(idxPrimary); shares.push(wPrimary); totalShare += wPrimary;
+        indices.push(idxPair);    shares.push(wPair);    totalShare += wPair;
+    }
+    if (totalShare < 1e-6) totalShare = 1;
+    for (let s = 0; s < indices.length; s++) {
+        applyMouseSpringNormalizedForBlob(blob, indices[s], shares[s], totalShare);
+    }
+}
+
+function applyMouseSpringNormalizedForBlob(blob, pointIndex, share, totalShare) {
+    let p = blob.points[pointIndex];
+    let dx = mouseX - p.x;
+    let dy = mouseY - p.y;
+    let shareNorm = share / totalShare;
+    let fx = (MOUSE_SPRING_K * shareNorm) * dx - (MOUSE_SPRING_DAMP * DRAG_DAMP_MULTIPLIER * shareNorm) * p.vx;
+    let fy = (MOUSE_SPRING_K * shareNorm) * dy - (MOUSE_SPRING_DAMP * DRAG_DAMP_MULTIPLIER * shareNorm) * p.vy;
+    let maxF = MOUSE_MAX_FORCE * shareNorm;
+    let fmag = sqrt(fx*fx + fy*fy);
+    if (fmag > maxF) {
+        let scale = maxF / (fmag + 1e-6);
+        fx *= scale;
+        fy *= scale;
+    }
+    p.ax += fx;
+    p.ay += fy;
+}
+
 function computeOuterArea() {
 	let area = 0;
 	for (var i = 0; i < num_points; i++) {
@@ -234,6 +528,202 @@ function computeOuterArea() {
 		area += a.x * b.y - b.x * a.y;
 	}
 	return 0.5 * area;
+}
+
+function computeOuterAreaForBlob(blob) {
+	let area = 0;
+	for (var i = 0; i < blob.vertexCount; i++) {
+		let a = blob.points[2 * i + 1];
+		let b = blob.points[(2 * ((i + 1) % blob.vertexCount)) + 1];
+		area += a.x * b.y - b.x * a.y;
+	}
+	return 0.5 * area;
+}
+
+function pointInPolygon(x, y, polygonPoints) {
+    // Ray casting on ordered polygon points
+    let inside = false;
+    for (let i = 0, j = polygonPoints.length - 1; i < polygonPoints.length; j = i++) {
+        const xi = polygonPoints[i].x, yi = polygonPoints[i].y;
+        const xj = polygonPoints[j].x, yj = polygonPoints[j].y;
+        const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / ((yj - yi) + 1e-9) + xi);
+        if (intersect) inside = !inside;
+    }
+    return inside;
+}
+
+function blobOuterPolygon(blob) {
+    let poly = [];
+    for (let i = 0; i < blob.vertexCount; i++) {
+        poly.push({ x: blob.points[2 * i + 1].x, y: blob.points[2 * i + 1].y });
+    }
+    return poly;
+}
+
+function obstaclePenetratesBlob(blob, obstacle) {
+    // Consider obstacle center inside the outer polygon as penetration heuristic
+    const poly = blobOuterPolygon(blob);
+    return pointInPolygon(obstacle.x, obstacle.y, poly);
+}
+
+function maybeSplitPenetratedBlobs() {
+    const now = (typeof millis === 'function') ? (millis() / 1000.0) : 0;
+    if (now - lastSplitAt < BLOB_SPLIT_COOLDOWN) return;
+    for (let b = blobs.length - 1; b >= 0; b--) {
+        const blob = blobs[b];
+        if (blob.isChild) continue; // do not split children
+        for (let o = 0; o < obstacles.length; o++) {
+            if (obstaclePenetratesBlob(blob, obstacles[o])) {
+                splitBlobAtObstacle(b, obstacles[o]);
+                lastSplitAt = now;
+                return; // one split per cooldown
+            }
+        }
+    }
+}
+
+function splitBlobAtObstacle(blobIndex, obstacle) {
+    const blob = blobs[blobIndex];
+    const cx = obstacle.x;
+    const cy = obstacle.y;
+    const newInner = max(5, blob.innerRadius * BLOB_SPLIT_SCALE);
+    const newOuter = max(newInner + 4, blob.outerRadius * BLOB_SPLIT_SCALE);
+    const newVerts = max(8, Math.round(blob.vertexCount * BLOB_SPLIT_SCALE));
+
+    // Compute axis perpendicular (90°) to obstacle's trajectory tangent
+    let tvx = obstacle.vx;
+    let tvy = obstacle.vy;
+    let tvlen = sqrt(tvx*tvx + tvy*tvy);
+    if (!(tvlen > 1e-6)) {
+        // Fallback: vector from blob hub to obstacle
+        let hub = blob.points[blob.points.length - 1];
+        tvx = obstacle.x - hub.x;
+        tvy = obstacle.y - hub.y;
+        tvlen = sqrt(tvx*tvx + tvy*tvy);
+    }
+    if (!(tvlen > 1e-6)) {
+        tvx = 1; tvy = 0; tvlen = 1; // final fallback
+    }
+    // Tangent unit
+    let tux = tvx / tvlen;
+    let tuy = tvy / tvlen;
+    // Perpendicular unit (rotate 90°)
+    let nux = -tuy;
+    let nuy = tux;
+
+    const offset = max(10, blob.outerRadius * 0.6 + obstacle.r * 0.3);
+    const bx1 = cx + nux * offset;
+    const by1 = cy + nuy * offset;
+    const bx2 = cx - nux * offset;
+    const by2 = cy - nuy * offset;
+
+    let b1 = new BlobInstance(newInner, newOuter, newVerts, bx1, by1);
+    b1.restOuterArea = b1.computeOuterArea();
+    let b2 = new BlobInstance(newInner, newOuter, newVerts, bx2, by2);
+    b2.restOuterArea = b2.computeOuterArea();
+    b1.isChild = true;
+    b2.isChild = true;
+    blobs.splice(blobIndex, 1);
+    blobs.push(b1);
+    blobs.push(b2);
+    draggingBlob = false;
+    draggedPointIndex = -1;
+    draggedBlobIndex = -1;
+}
+
+function applyPressureForcesForBlob(blob) {
+	let area = computeOuterAreaForBlob(blob);
+	let restArea = blob.restOuterArea || blob.computeOuterArea();
+	if (restArea === 0) return;
+	let rel = (restArea - area) / restArea;
+	let k = rel > 0 ? PRESSURE_K * 1.25 : PRESSURE_K * 0.6;
+	let dscaleP = getDensityScale();
+	let pressure = (k * dscaleP) * rel;
+	if (pressure === 0) return;
+	let outwardSign = (area > 0) ? 1 : -1;
+	for (var i = 0; i < blob.vertexCount; i++) {
+		let a = blob.points[2 * i + 1];
+		let b = blob.points[(2 * ((i + 1) % blob.vertexCount)) + 1];
+		let ex = b.x - a.x;
+		let ey = b.y - a.y;
+		let len = sqrt(ex*ex + ey*ey) + 1e-6;
+		let nx = outwardSign * (ey / len);
+		let ny = outwardSign * (-ex / len);
+		let f = pressure * len;
+		let mag = min(abs(f), MAX_PRESSURE_FORCE);
+		let fx = mag * Math.sign(f) * nx;
+		let fy = mag * Math.sign(f) * ny;
+		a.ax += fx * 0.5;
+		a.ay += fy * 0.5;
+		b.ax += fx * 0.5;
+		b.ay += fy * 0.5;
+	}
+}
+
+function applyRimSelfRepulsionForBlob(blob) {
+	for (var i = 0; i < blob.vertexCount; i++) {
+		let ai = 2 * i + 1;
+		let a = blob.points[ai];
+		for (var j = i + 2; j < blob.vertexCount; j++) {
+			if ((i === 0 && j === blob.vertexCount - 1)) continue;
+			let bi = 2 * j + 1;
+			let b = blob.points[bi];
+			let dx = b.x - a.x;
+			let dy = b.y - a.y;
+			let d2 = dx*dx + dy*dy;
+			let r = SELF_REPEL_RADIUS;
+			if (d2 < r*r) {
+				let d = sqrt(d2) + 1e-6;
+				let ux = dx / d;
+				let uy = dy / d;
+				let overlap = 1 - (d / r);
+				let mag = SELF_REPEL_STRENGTH * overlap;
+				mag = min(mag, MAX_EXTRA_FORCE);
+				let fx = mag * ux;
+				let fy = mag * uy;
+				a.ax -= fx;
+				a.ay -= fy;
+				b.ax += fx;
+				b.ay += fy;
+			}
+		}
+	}
+}
+
+function applyRimBendingForBlob(blob) {
+	for (var i = 0; i < blob.vertexCount; i++) {
+		let prev = (i - 1 + blob.vertexCount) % blob.vertexCount;
+		let next = (i + 1) % blob.vertexCount;
+		let pPrev = blob.points[2 * prev + 1];
+		let pCurr = blob.points[2 * i + 1];
+		let pNext = blob.points[2 * next + 1];
+		let lapx = pPrev.x + pNext.x - 2 * pCurr.x;
+		let lapy = pPrev.y + pNext.y - 2 * pCurr.y;
+		let bx = BENDING_K * lapx;
+		let by = BENDING_K * lapy;
+		let bmag = sqrt(bx*bx + by*by);
+		if (bmag > MAX_EXTRA_FORCE) {
+			let s = MAX_EXTRA_FORCE / (bmag + 1e-6);
+			bx *= s;
+			by *= s;
+		}
+		pCurr.ax += bx;
+		pCurr.ay += by;
+	}
+}
+
+function applyRimVelocitySmoothingForBlob(blob) {
+	for (var i = 0; i < blob.vertexCount; i++) {
+		let prev = (i - 1 + blob.vertexCount) % blob.vertexCount;
+		let next = (i + 1) % blob.vertexCount;
+		let pPrev = blob.points[2 * prev + 1];
+		let pCurr = blob.points[2 * i + 1];
+		let pNext = blob.points[2 * next + 1];
+		let vLapx = pPrev.vx + pNext.vx - 2 * pCurr.vx;
+		let vLapy = pPrev.vy + pNext.vy - 2 * pCurr.vy;
+		pCurr.vx += VISC_BEND_COEF * vLapx * RATE;
+		pCurr.vy += VISC_BEND_COEF * vLapy * RATE;
+	}
 }
 
 function applyPressureForces() {
@@ -334,14 +824,19 @@ function applyRimVelocitySmoothing() {
 }
 
 function initializeBlob(newNumPoints) {
+	// Optional centerX, centerY accepted via arguments[1], arguments[2] to preserve backward compatibility
+	let centerX = arguments.length > 1 ? arguments[1] : undefined;
+	let centerY = arguments.length > 2 ? arguments[2] : undefined;
 	points = [];
 	springs = [];
 	num_points = newNumPoints;
+	let cx = (typeof centerX === 'number') ? centerX : width/2;
+	let cy = (typeof centerY === 'number') ? centerY : height/2;
 	for (var i = 0; i < num_points; i++) {
-		points.push(new Point(width/2 + inner_radius * cos(2 * PI * i / num_points), height/2 + inner_radius * sin(2 * PI * i / num_points)));
-		points.push(new Point(width/2 + outer_radius * cos(2 * PI * i / num_points), height/2 + outer_radius * sin(2 * PI * i / num_points)));
+		points.push(new Point(cx + inner_radius * cos(2 * PI * i / num_points), cy + inner_radius * sin(2 * PI * i / num_points)));
+		points.push(new Point(cx + outer_radius * cos(2 * PI * i / num_points), cy + outer_radius * sin(2 * PI * i / num_points)));
 	}
-	points.push(new Point(width/2, height/2));
+	points.push(new Point(cx, cy));
 	let centre = points[points.length - 1];
 	for (var i = 0; i < num_points; i++) {
 		springs.push(new Spring(points[2 * i], points[2 * i + 1], OUTER_RIM_K));
