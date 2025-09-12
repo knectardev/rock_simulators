@@ -2,7 +2,7 @@
 let rSlider, vertexSlider, gravitySlider, densitySlider, fillColorSlider, fillOpacitySlider, thicknessSlider, frictionSlider, obstacleDensitySlider, obstacleSpawnRateSlider, obstacleRepelSlider;
 let rLabel, vertexLabel, gravityLabel, densityLabel, thicknessLabel, fillLabel, fillOpacityLabel, frictionLabel, obstacleDensityLabel, obstacleSpawnRateLabel, obstacleRepelLabel;
 let uiPanel;
-let fillCheckbox, rimCheckbox, wireCheckbox, pointsCheckbox, solidCheckbox, trailCheckbox, centerDragCheckbox;
+let fillCheckbox, rimCheckbox, wireCheckbox, pointsCheckbox, solidCheckbox, vectorCheckbox, trailCheckbox, centerDragCheckbox;
 let BASE_NUM_POINTS;
 
 let ADD_RANDOM_CROSS_SPRINGS = false;
@@ -42,7 +42,8 @@ function setup() {
 	uiPanel.style('border', '1px solid #000');
 	uiPanel.style('padding', '8px');
 	uiPanel.style('width', '360px');
-	uiPanel.style('height', '500px');
+	uiPanel.style('height', (windowHeight - 16) + 'px');
+	uiPanel.style('overflow-y', 'auto');
 	uiPanel.style('z-index', '0');
 
 	// Even spacing for sliders
@@ -137,15 +138,18 @@ function setup() {
 	rimCheckbox = createCheckbox('Display blob border rim', false);
 	rimCheckbox.position(20, checkboxY); checkboxY += CHECKBOX_GAP;
 	styleCheckbox(rimCheckbox);
-	wireCheckbox = createCheckbox('Display blob wire-frame', true);
+	wireCheckbox = createCheckbox('Display blob wire-frame', false);
 	wireCheckbox.position(20, checkboxY); checkboxY += CHECKBOX_GAP;
 	styleCheckbox(wireCheckbox);
 	pointsCheckbox = createCheckbox('Display mesh points', false);
 	pointsCheckbox.position(20, checkboxY); checkboxY += CHECKBOX_GAP;
 	styleCheckbox(pointsCheckbox);
-	solidCheckbox = createCheckbox('Display blob solid interior', false);
+	solidCheckbox = createCheckbox('Display blob solid interior', true);
 	solidCheckbox.position(20, checkboxY); checkboxY += CHECKBOX_GAP;
 	styleCheckbox(solidCheckbox);
+	vectorCheckbox = createCheckbox('Display green force vectors', false);
+	vectorCheckbox.position(20, checkboxY); checkboxY += CHECKBOX_GAP;
+	styleCheckbox(vectorCheckbox);
 	trailCheckbox = createCheckbox('Display obstacle trails', false);
 	trailCheckbox.position(20, checkboxY); checkboxY += CHECKBOX_GAP;
 	styleCheckbox(trailCheckbox);
@@ -208,6 +212,8 @@ function draw() {
 		OBSTACLE_MAX_PAIR_FORCE = OBSTACLE_MAX_PAIR_FORCE_BASE * max(0.2, scale);
 	}
 	updatePhysics();
+	// Update cursor based on drag state
+	cursor(draggingBlob ? 'grabbing' : 'default');
 	applyGlobalScroll();
 	recycleObstacles();
 	drawObjects();
@@ -265,7 +271,7 @@ function drawObjects() {
 		}
 	}
 	if (showRim) {
-		stroke(0);
+		stroke(0, 122, 255);
 		strokeWeight(2);
 		for (var b = 0; b < blobs.length; b++) {
 			let blob = blobs[b];
@@ -288,8 +294,10 @@ function drawObjects() {
 	for (var i = 0; i < obstacles.length; i++) {
 		obstacles[i].draw();
 	}
-	drawForceVectors();
-	if (draggingBlob && draggedPointIndex >= 0) {
+	if (vectorCheckbox ? vectorCheckbox.checked() : true) {
+		drawForceVectors();
+	}
+	if ((vectorCheckbox ? vectorCheckbox.checked() : true) && draggingBlob && draggedPointIndex >= 0) {
 		push();
 		stroke(0, 255, 0);
 		fill(0, 255, 0);
@@ -298,7 +306,9 @@ function drawObjects() {
 			if (centerDragCheckbox && centerDragCheckbox.checked()) {
 				let centre = blob.points[blob.points.length - 1];
 				strokeWeight(2);
-				line(centre.x, centre.y, mouseX, mouseY);
+				let tx = (typeof keyboardTugActive !== 'undefined' && keyboardTugActive) ? virtualCursorX : mouseX;
+				let ty = (typeof keyboardTugActive !== 'undefined' && keyboardTugActive) ? virtualCursorY : mouseY;
+				line(centre.x, centre.y, tx, ty);
 			} else {
 				let isOuter = (draggedPointIndex % 2) === 1;
 				let v = Math.floor(draggedPointIndex / 2);
@@ -307,13 +317,15 @@ function drawObjects() {
 					let idxPrimary = isOuter ? (2 * j + 1) : (2 * j);
 					let idxPair = isOuter ? (2 * j) : (2 * j + 1);
 					strokeWeight(2);
-					line(blob.points[idxPrimary].x, blob.points[idxPrimary].y, mouseX, mouseY);
+					let tx2 = (typeof keyboardTugActive !== 'undefined' && keyboardTugActive) ? virtualCursorX : mouseX;
+					let ty2 = (typeof keyboardTugActive !== 'undefined' && keyboardTugActive) ? virtualCursorY : mouseY;
+					line(blob.points[idxPrimary].x, blob.points[idxPrimary].y, tx2, ty2);
 					strokeWeight(1);
-					line(blob.points[idxPair].x, blob.points[idxPair].y, mouseX, mouseY);
+					line(blob.points[idxPair].x, blob.points[idxPair].y, tx2, ty2);
 				}
 			}
 		}
-		circle(mouseX, mouseY, 8);
+		// Removed mouse marker circle so the OS hand cursor remains visually unobstructed
 		pop();
 	}
 }
@@ -321,5 +333,8 @@ function drawObjects() {
 
 function windowResized() {
 	resizeCanvas(windowWidth, windowHeight);
+	if (typeof uiPanel !== 'undefined' && uiPanel) {
+		uiPanel.style('height', (windowHeight - 16) + 'px');
+	}
 }
 

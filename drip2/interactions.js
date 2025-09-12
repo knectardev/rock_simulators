@@ -6,6 +6,9 @@ let draggedPointIndex = -1;
 let draggedBlobIndex = -1;
 let SPAWN_PAUSED = false;
 let hiddenObstaclesBackup = [];
+let keyboardTugActive = false;
+let virtualCursorX = 0;
+let virtualCursorY = 0;
 
 function handleGlobalKeydown(e) {
 	if (e.code === 'Space' || e.key === ' ' || e.keyCode === 32) {
@@ -25,9 +28,42 @@ function handleGlobalKeydown(e) {
 		}
 		e.preventDefault();
 	}
+	// Arrow key control for blob position (virtual cursor)
+	if (e.code === 'ArrowLeft' || e.code === 'ArrowRight' || e.code === 'ArrowUp' || e.code === 'ArrowDown') {
+		// Activate keyboard tug on first use
+		if (!keyboardTugActive) {
+			keyboardTugActive = true;
+			// Initialize strictly from blob centre (or canvas centre); ignore mouse entirely
+			if (typeof blobs !== 'undefined' && blobs.length > 0) {
+				let c = blobs[blobs.length - 1].points[blobs[blobs.length - 1].points.length - 1];
+				virtualCursorX = c.x;
+				virtualCursorY = c.y;
+			} else {
+				virtualCursorX = width/2;
+				virtualCursorY = height/2;
+			}
+		}
+		let step = KEY_TUG_SPEED * RATE;
+		if (e.code === 'ArrowLeft')  virtualCursorX -= step;
+		if (e.code === 'ArrowRight') virtualCursorX += step;
+		if (e.code === 'ArrowUp')    virtualCursorY -= step;
+		if (e.code === 'ArrowDown')  virtualCursorY += step;
+		// Begin a drag on nearest blob centre if not already dragging
+		if (!draggingBlob && typeof blobs !== 'undefined' && blobs.length > 0) {
+			let idx = blobs.length - 1;
+			draggingBlob = true;
+			draggedBlobIndex = idx;
+			draggedPointIndex = blobs[idx].points.length - 1; // hub
+		}
+		e.preventDefault();
+	}
 }
 
 function mousePressed() {
+    // If keyboard tug was active, clicking switches control back to mouse
+    if (keyboardTugActive) {
+        keyboardTugActive = false;
+    }
 	for (var i = obstacles.length - 1; i >= 0; i--) {
 		if (obstacles[i].contains(mouseX, mouseY)) {
 			draggingObstacle = obstacles[i];
@@ -72,10 +108,13 @@ function mouseDragged() {
 }
 
 function mouseReleased() {
-	draggingObstacle = null;
-	draggingBlob = false;
-	draggedPointIndex = -1;
-	draggedBlobIndex = -1;
+    draggingObstacle = null;
+    // Do not stop keyboard-driven drag on mouse release
+    if (!keyboardTugActive) {
+        draggingBlob = false;
+        draggedPointIndex = -1;
+        draggedBlobIndex = -1;
+    }
 }
 
 function applyGlobalScroll() {

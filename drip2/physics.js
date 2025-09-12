@@ -85,19 +85,50 @@ function updatePhysics() {
 	if (draggingBlob && typeof draggedBlobIndex === 'number' && draggedBlobIndex >= 0 && draggedPointIndex >= 0 && draggedBlobIndex < blobs.length) {
 		let blobDrag = blobs[draggedBlobIndex];
 		if (typeof centerDragCheckbox !== 'undefined' && centerDragCheckbox.checked()) {
-			// Apply a single spring from the centre point to mouse
 			let centre = blobDrag.points[blobDrag.points.length - 1];
-			let dx = mouseX - centre.x;
-			let dy = mouseY - centre.y;
-			let fx = MOUSE_SPRING_K * dx - (MOUSE_SPRING_DAMP * DRAG_DAMP_MULTIPLIER) * centre.vx;
-			let fy = MOUSE_SPRING_K * dy - (MOUSE_SPRING_DAMP * DRAG_DAMP_MULTIPLIER) * centre.vy;
-			let fmag = sqrt(fx*fx + fy*fy);
-			let maxF = MOUSE_MAX_FORCE;
-			if (fmag > maxF) { let s = maxF / (fmag + 1e-6); fx *= s; fy *= s; }
-			centre.ax += fx;
-			centre.ay += fy;
+			if (typeof CENTER_DRAG_RIGID !== 'undefined' && CENTER_DRAG_RIGID) {
+				// Rigid translation: move entire blob towards mouse by delta; minimal deformation
+				let targetX = keyboardTugActive ? virtualCursorX : mouseX;
+				let targetY = keyboardTugActive ? virtualCursorY : mouseY;
+				let dx = (targetX - centre.x) * CENTER_RIGID_FOLLOW_GAIN;
+				let dy = (targetY - centre.y) * CENTER_RIGID_FOLLOW_GAIN;
+				for (var rp = 0; rp < blobDrag.points.length; rp++) {
+					blobDrag.points[rp].x += dx;
+					blobDrag.points[rp].y += dy;
+					blobDrag.points[rp].vx *= exp(-CENTER_RIGID_DAMP * RATE);
+					blobDrag.points[rp].vy *= exp(-CENTER_RIGID_DAMP * RATE);
+				}
+				// Skip spring-based centre tug and limits in rigid mode
+			} else {
+				// Apply a single spring from the centre point to mouse (legacy elastic mode)
+				let targetX = keyboardTugActive ? virtualCursorX : mouseX;
+				let targetY = keyboardTugActive ? virtualCursorY : mouseY;
+				let dx = targetX - centre.x;
+				let dy = targetY - centre.y;
+				let fx = MOUSE_SPRING_K * dx - (MOUSE_SPRING_DAMP * DRAG_DAMP_MULTIPLIER) * centre.vx;
+				let fy = MOUSE_SPRING_K * dy - (MOUSE_SPRING_DAMP * DRAG_DAMP_MULTIPLIER) * centre.vy;
+				let fmag = sqrt(fx*fx + fy*fy);
+				let maxF = MOUSE_MAX_FORCE;
+				if (fmag > maxF) { let s = maxF / (fmag + 1e-6); fx *= s; fy *= s; }
+				// Blend: keep a portion at the hub, distribute the rest to all points
+				let keepHub = (typeof CENTER_TUG_CENTER_SHARE !== 'undefined') ? CENTER_TUG_CENTER_SHARE : 0.35;
+				keepHub = max(0, min(1, keepHub));
+				let hubFx = fx * keepHub;
+				let hubFy = fy * keepHub;
+				centre.ax += hubFx;
+				centre.ay += hubFy;
+				let residualFx = fx - hubFx;
+				let residualFy = fy - hubFy;
+				let npts = blobDrag.points.length;
+				if (npts < 1) npts = 1;
+				let shareFx = residualFx / npts;
+				let shareFy = residualFy / npts;
+				for (var rp = 0; rp < blobDrag.points.length; rp++) {
+					blobDrag.points[rp].ax += shareFx;
+					blobDrag.points[rp].ay += shareFy;
+				}
 
-			// Soft radial limit: if hub moves too far from blob's geometric center, pull it back
+				// Soft radial limit: if hub moves too far from blob's geometric center, pull it back
 			let limitR = max(1, blobDrag.innerRadius * CENTER_TUG_MAX_OFFSET_SCALE);
 			let geomCx = 0, geomCy = 0;
 			for (var gi = 0; gi < blobDrag.vertexCount; gi++) {
@@ -161,6 +192,7 @@ function updatePhysics() {
 				if (bmag > CENTER_TUG_FORCE_CAP) { let sb = CENTER_TUG_FORCE_CAP / (bmag + 1e-6); bfx *= sb; bfy *= sb; }
 				centre.ax += bfx;
 				centre.ay += bfy;
+			}
 			}
 		} else {
 			applyDistributedMouseTugForBlob(blobDrag, draggedPointIndex);

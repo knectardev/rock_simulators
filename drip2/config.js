@@ -15,23 +15,30 @@ const OUTER_RIM_K = 20000;
 const INNER_SPOKE_K = 400;
 
 // Mouse interaction
-const MOUSE_SPRING_K = 6000;
-const MOUSE_SPRING_DAMP = 100;
-const MOUSE_MAX_FORCE = 20000;
+const MOUSE_SPRING_K = 14000;   // gentler, tighter feel without over-pulling
+const MOUSE_SPRING_DAMP = 140;  // damping to curb oscillation
+const MOUSE_MAX_FORCE = 40000;  // enough headroom without harsh pulls
+const KEY_TUG_SPEED = 700;      // px/sec for virtual keyboard cursor
 
 // Center-drag stabilization (prevents hub from inverting past rim)
-let CENTER_TUG_MAX_OFFSET_SCALE = 0.0001;  // fraction of blob.innerRadius
-let CENTER_TUG_RESTORE_K = 22000;       // spring back when exceeding limit
+let CENTER_TUG_MAX_OFFSET_SCALE = 0.1;  // fraction of blob.innerRadius
+let CENTER_TUG_RESTORE_K = 20000;       // spring back when exceeding limit
 let CENTER_TUG_RESTORE_DAMP = 900;      // damping along radial extension
-let CENTER_TUG_BOUNDARY_K = 58000;      // extra correction when hub is outside rim polygon
+let CENTER_TUG_BOUNDARY_K = 28000;      // extra correction when hub is outside rim polygon
 let CENTER_TUG_BOUNDARY_DAMP = 1200;    // damping for boundary correction
-let CENTER_TUG_FORCE_CAP = 20000;       // max accel equivalent for center correction forces
+let CENTER_TUG_FORCE_CAP = 14000;       // max accel equivalent for center correction forces
+let CENTER_TUG_CENTER_SHARE = 0.55;     // fraction of mouse force kept at hub (rest distributed)
+
+// Rigid center drag (near 1:1 follow with minimal deformation)
+let CENTER_DRAG_RIGID = false;           // when true, use rigid translation for center drag
+let CENTER_RIGID_FOLLOW_GAIN = 0.1;     // 1.0 -> move hub exactly to mouse per frame
+let CENTER_RIGID_DAMP = 2.0;           // velocity damping for all points while rigid-dragging
 
 // Drag neighborhood parameters
 const DRAG_NEIGHBOR_RANGE = 2;
 const DRAG_NEIGHBOR_DECAY = 0.6;
 const DRAG_PAIR_WEIGHT = 0.5;
-const DRAG_DAMP_MULTIPLIER = 2.0;
+const DRAG_DAMP_MULTIPLIER = 2.0; // restore default distributed damping
 
 // Visualization / hub
 const HUB_RADIUS = 20;
