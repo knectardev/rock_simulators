@@ -63,6 +63,21 @@ let OBSTACLE_DENSITY = 0.005;
 let OBSTACLE_DAMPING = 3.5;
 let CONTACT_FORCE_FACTOR = 0.25;
 
+// Size-dependent density scaling (inverse with radius)
+// Effective density multiplier per obstacle: clamp((REF_RADIUS / r)^EXP, MIN, MAX)
+let OBSTACLE_DENSITY_SIZE_REF = CANVAS_SIZE / 10;
+let OBSTACLE_DENSITY_SIZE_EXP = 1.5;
+let OBSTACLE_DENSITY_SCALE_MIN = 0.3;
+let OBSTACLE_DENSITY_SCALE_MAX = 2.5;
+
+// Default per-shape colors (CSS hex strings)
+let CIRCLE_FILL_COLOR = '#F78282';
+let CIRCLE_STROKE_COLOR = '#000000';
+let SQUARE_FILL_COLOR = '#4682B4'; // steel blue
+let SQUARE_STROKE_COLOR = '#000000'; // crimson
+let TRIANGLE_FILL_COLOR = '#90EE90'; // light green
+let TRIANGLE_STROKE_COLOR = '#000000'; // midnight blue
+
 // Obstacle-obstacle contact (repel like weak magnets)
 let OBSTACLE_CONTACT_REPEL_K_BASE = 800; // base spring-like repel strength
 let OBSTACLE_CONTACT_REPEL_K = OBSTACLE_CONTACT_REPEL_K_BASE; // runtime value (scaled by UI)
@@ -86,6 +101,16 @@ let BLOB_MASS_PER_AREA = 0.002;
 let ENABLE_BLOB_SPLIT_ON_PENETRATION = true;
 const BLOB_SPLIT_COOLDOWN = 0.8; // seconds
 const BLOB_SPLIT_SCALE = 0.5; // half size
+
+// Absorption behavior
+const ABSORBED_OBSTACLE_DIAMETER = 40; // px; attached obstacles resize to this diameter
+const ABSORBED_RESIZE_RATE = 20; // px/sec radius approach speed for smoothing
+const ABSORBED_SIZE_SCALE = 0.37; // target = original_radius * scale (15% of original size)
+const ABSORBED_ORBIT_SPEED = 2.6; // radians/sec for orbital motion around blob center
+const ABSORBED_ORBIT_BASE_RADIUS = 50; // px base distance from center
+const ABSORBED_ORBIT_SPACING = 22; // px extra spacing per satellite index
+const ABSORBED_ORBIT_K = 40; // spring gain pulling toward orbit target
+const ABSORBED_ORBIT_DAMP = 6.0; // damping for orbit converge
 
 // Force visualization
 const FORCE_VIS_SCALE = 0.03;

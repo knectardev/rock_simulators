@@ -31,6 +31,22 @@ function sdf_force(p) {
 	return [factor * norm[0], factor * norm[1]];
 }
 
+function obstacleDistanceAt(ob, x, y) {
+	if (ob && typeof ob.distance === 'function') {
+		return ob.distance([x, y]);
+	}
+	return sqrt((x - ob.x)*(x - ob.x) + (y - ob.y)*(y - ob.y)) - ob.r;
+}
+
+function obstacleNormalAt(ob, x, y) {
+	let eps = 0.001;
+	let d0 = obstacleDistanceAt(ob, x, y);
+	let ddx = obstacleDistanceAt(ob, x + eps, y) - d0;
+	let ddy = obstacleDistanceAt(ob, x, y + eps) - d0;
+	let len = sqrt(ddx*ddx + ddy*ddy) + 1e-9;
+	return [ddx / len, ddy / len];
+}
+
 function getDensityScale() {
 	let v = densitySlider ? densitySlider.value() : 1;
 	let dmin = 0.25, dmax = 2.0;
@@ -266,7 +282,8 @@ function updateObstacleDynamics() {
 		obstacles[k].ax = 0;
 		obstacles[k].ay = 0;
 		if (obstacleDensitySlider) {
-			obstacles[k].mass = max(1, PI * obstacles[k].r * obstacles[k].r * OBSTACLE_DENSITY * obstacleDensitySlider.value());
+			let scale = (typeof obstacles[k].densityScale === 'number') ? obstacles[k].densityScale : 1.0;
+			obstacles[k].mass = max(1, PI * obstacles[k].r * obstacles[k].r * OBSTACLE_DENSITY * scale * obstacleDensitySlider.value());
 		}
 	}
 	let mu = frictionSlider ? frictionSlider.value() : 0;
@@ -277,15 +294,13 @@ function updateObstacleDynamics() {
 			let minDist = 1e9;
 			for (var j = 0; j < obstacles.length; j++) {
 				let o = obstacles[j];
-				let d = sqrt((p.x - o.x)*(p.x - o.x) + (p.y - o.y)*(p.y - o.y)) - o.r;
+				let d = obstacleDistanceAt(o, p.x, p.y);
 				if (d < minDist) { minDist = d; nearest = o; }
 			}
 			if (!nearest) continue;
 			if (minDist < CONTACT_BAND) {
-				let dx = p.x - nearest.x;
-				let dy = p.y - nearest.y;
-				let len = sqrt(dx*dx + dy*dy) + 1e-6;
-				let nx = dx / len, ny = dy / len;
+				let n = obstacleNormalAt(nearest, p.x, p.y);
+				let nx = n[0], ny = n[1];
 				let tx = -ny, ty = nx;
 				let vt = p.vx * tx + p.vy * ty;
 				let proximity = 1 - max(0, minDist) / CONTACT_BAND;
@@ -364,7 +379,8 @@ function updateObstacleDynamicsMulti() {
 		obstacles[k].ax = 0;
 		obstacles[k].ay = 0;
 		if (obstacleDensitySlider) {
-			obstacles[k].mass = max(1, PI * obstacles[k].r * obstacles[k].r * OBSTACLE_DENSITY * obstacleDensitySlider.value());
+			let scale = (typeof obstacles[k].densityScale === 'number') ? obstacles[k].densityScale : 1.0;
+			obstacles[k].mass = max(1, PI * obstacles[k].r * obstacles[k].r * OBSTACLE_DENSITY * scale * obstacleDensitySlider.value());
 		}
 	}
 	// Pairwise obstacle repulsion (pre-integration forces)
@@ -401,17 +417,15 @@ function updateObstacleDynamicsMulti() {
 				let minDist = 1e9;
 				for (var j = 0; j < obstacles.length; j++) {
 					let o = obstacles[j];
-					let d = sqrt((p.x - o.x)*(p.x - o.x) + (p.y - o.y)*(p.y - o.y)) - o.r;
+					let d = obstacleDistanceAt(o, p.x, p.y);
 					if (d < minDist) { minDist = d; nearest = o; }
 				}
 				if (!nearest) continue;
 				// If obstacle is attached, skip friction forces here
 				if (nearest.attachedBlobIndex >= 0) continue;
 				if (minDist < CONTACT_BAND) {
-					let dx = p.x - nearest.x;
-					let dy = p.y - nearest.y;
-					let len = sqrt(dx*dx + dy*dy) + 1e-6;
-					let nx = dx / len, ny = dy / len;
+					let n = obstacleNormalAt(nearest, p.x, p.y);
+					let nx = n[0], ny = n[1];
 					let tx = -ny, ty = nx;
 					let vt = p.vx * tx + p.vy * ty;
 					let proximity = 1 - max(0, minDist) / CONTACT_BAND;
@@ -438,6 +452,17 @@ function updateObstacleDynamicsMulti() {
 			}
 		}
 	}
+
+	// Build per-blob lists of attached obstacles (for orbiting)
+	let attachedByBlob = new Map();
+	for (var k = 0; k < obstacles.length; k++) {
+		let o = obstacles[k];
+		if (o.attachedBlobIndex >= 0) {
+			if (!attachedByBlob.has(o.attachedBlobIndex)) attachedByBlob.set(o.attachedBlobIndex, []);
+			attachedByBlob.get(o.attachedBlobIndex).push(o);
+		}
+	}
+
 	for (var m = 0; m < obstacles.length; m++) {
 		let o = obstacles[m];
 		if (o.attachedBlobIndex >= 0 && o.attachedBlobIndex < blobs.length) {
@@ -446,6 +471,47 @@ function updateObstacleDynamicsMulti() {
 			let kattach = 10.0;
 			o.ax += kattach * (ctr.x - o.x);
 			o.ay += kattach * (ctr.y - o.y);
+			// Smoothly resize to scaled original radius while attached
+			if (typeof ABSORBED_SIZE_SCALE !== 'undefined') {
+				if (typeof o.__originalRadius !== 'number') {
+					// Cache original radius upon first attachment
+					o.__originalRadius = max(1e-6, o.r);
+				}
+				let targetR = o.__originalRadius * ABSORBED_SIZE_SCALE;
+				let ratePxPerSec = (typeof ABSORBED_RESIZE_RATE !== 'undefined') ? ABSORBED_RESIZE_RATE : 20;
+				let dr = (targetR - o.r);
+				let step = ratePxPerSec * RATE;
+				if (abs(dr) <= step) {
+					o.r = targetR;
+				} else {
+					o.r += step * Math.sign(dr);
+				}
+			}
+
+			// Orbit dynamics when there are 2+ attached obstacles for this blob
+			let list = attachedByBlob.get(o.attachedBlobIndex);
+			if (list && list.length >= 2) {
+				// Determine index of this obstacle within its group's stable sort
+				// Use identity-order from the list and maintain a persistent angle offset on the object
+				if (typeof o.__orbitIndex !== 'number') {
+					o.__orbitIndex = list.indexOf(o);
+				}
+				if (typeof o.__orbitTheta !== 'number') {
+					o.__orbitTheta = (TWO_PI * o.__orbitIndex) / list.length;
+				}
+				let omega = (typeof ABSORBED_ORBIT_SPEED !== 'undefined') ? ABSORBED_ORBIT_SPEED : 0.6; // rad/sec
+				o.__orbitTheta += omega * RATE;
+				let baseR = (typeof ABSORBED_ORBIT_BASE_RADIUS !== 'undefined') ? ABSORBED_ORBIT_BASE_RADIUS : 30;
+				let spacing = (typeof ABSORBED_ORBIT_SPACING !== 'undefined') ? ABSORBED_ORBIT_SPACING : 22;
+				let orbitR = baseR + spacing * o.__orbitIndex;
+				let tx = ctr.x + orbitR * cos(o.__orbitTheta);
+				let ty = ctr.y + orbitR * sin(o.__orbitTheta);
+				let kOrb = (typeof ABSORBED_ORBIT_K !== 'undefined') ? ABSORBED_ORBIT_K : 40;
+				let cOrb = (typeof ABSORBED_ORBIT_DAMP !== 'undefined') ? ABSORBED_ORBIT_DAMP : 6.0;
+				// spring toward target orbit position with damping (in acceleration space)
+				o.ax += kOrb * (tx - o.x) - cOrb * o.vx;
+				o.ay += kOrb * (ty - o.y) - cOrb * o.vy;
+			}
 		}
 		o.vx += o.ax * RATE;
 		o.vy += o.ay * RATE;
@@ -491,16 +557,14 @@ function applyObstacleFriction() {
 		let minDist = 1e9;
 		for (var j = 0; j < obstacles.length; j++) {
 			let o = obstacles[j];
-			let d = sqrt((p.x - o.x)*(p.x - o.x) + (p.y - o.y)*(p.y - o.y)) - o.r;
+			let d = obstacleDistanceAt(o, p.x, p.y);
 			if (d < minDist) { minDist = d; nearest = o; }
 		}
 		if (!nearest) continue;
 		if (minDist < CONTACT_BAND) {
-			let dx = p.x - nearest.x;
-			let dy = p.y - nearest.y;
-			let len = sqrt(dx*dx + dy*dy) + 1e-6;
-			let nx = dx / len;
-			let ny = dy / len;
+			let n = obstacleNormalAt(nearest, p.x, p.y);
+			let nx = n[0];
+			let ny = n[1];
 			let tx = -ny;
 			let ty = nx;
 			let vt = p.vx * tx + p.vy * ty;
@@ -527,16 +591,14 @@ function applyObstacleFrictionMulti() {
 			let minDist = 1e9;
 			for (var j = 0; j < obstacles.length; j++) {
 				let o = obstacles[j];
-				let d = sqrt((p.x - o.x)*(p.x - o.x) + (p.y - o.y)*(p.y - o.y)) - o.r;
+				let d = obstacleDistanceAt(o, p.x, p.y);
 				if (d < minDist) { minDist = d; nearest = o; }
 			}
 			if (!nearest) continue;
 			if (minDist < CONTACT_BAND) {
-				let dx = p.x - nearest.x;
-				let dy = p.y - nearest.y;
-				let len = sqrt(dx*dx + dy*dy) + 1e-6;
-				let nx = dx / len;
-				let ny = dy / len;
+				let n = obstacleNormalAt(nearest, p.x, p.y);
+				let nx = n[0];
+				let ny = n[1];
 				let tx = -ny;
 				let ty = nx;
 				let vt = p.vx * tx + p.vy * ty;

@@ -1,6 +1,8 @@
 // UI elements
 let rSlider, vertexSlider, gravitySlider, densitySlider, fillColorSlider, fillOpacitySlider, thicknessSlider, frictionSlider, obstacleDensitySlider, obstacleSpawnRateSlider, obstacleRepelSlider;
 let rLabel, vertexLabel, gravityLabel, densityLabel, thicknessLabel, fillLabel, fillOpacityLabel, frictionLabel, obstacleDensityLabel, obstacleSpawnRateLabel, obstacleRepelLabel;
+let circleColorPicker, squareColorPicker, triangleColorPicker;
+let circleColorLabel, squareColorLabel, triangleColorLabel;
 let uiPanel;
 let fillCheckbox, rimCheckbox, wireCheckbox, pointsCheckbox, solidCheckbox, vectorCheckbox, trailCheckbox, centerDragCheckbox;
 let BASE_NUM_POINTS;
@@ -51,7 +53,7 @@ function setup() {
 	const SLIDER_GAP = 28;
 	let _y = SLIDER_START_Y;
 
-	rSlider = createSlider(0, 255, 255);
+	rSlider = createSlider(0, 360, 300, 1);
 	rSlider.position(20, _y); _y += SLIDER_GAP;
 	styleSlider(rSlider);
 	vertexSlider = createSlider(-1, 1, 0, 0.01);
@@ -81,7 +83,7 @@ function setup() {
 	styleSlider(obstacleDensitySlider);
 
 	// INSERTED: obstacle nucleation rate slider
-	obstacleSpawnRateSlider = createSlider(0.0, 4.0, 1.0, 0.01);
+	obstacleSpawnRateSlider = createSlider(0.0, 4.0, 3.0, 0.01);
 	obstacleSpawnRateSlider.position(20, _y); _y += SLIDER_GAP;
 	styleSlider(obstacleSpawnRateSlider);
 
@@ -90,7 +92,26 @@ function setup() {
 	obstacleRepelSlider.position(20, _y); _y += SLIDER_GAP;
 	styleSlider(obstacleRepelSlider);
 
-	rLabel = createDiv('red');
+	// INSERTED: per-shape color pickers
+	circleColorPicker = createColorPicker(CIRCLE_FILL_COLOR || '#ffffff');
+	circleColorPicker.position(20, _y); _y += SLIDER_GAP;
+	circleColorLabel = createDiv('circle color');
+	styleLabel(circleColorLabel);
+	circleColorLabel.position(circleColorPicker.x + circleColorPicker.width + 16, circleColorPicker.y - 4);
+
+	squareColorPicker = createColorPicker(SQUARE_FILL_COLOR || '#4682B4');
+	squareColorPicker.position(20, _y); _y += SLIDER_GAP;
+	squareColorLabel = createDiv('square color');
+	styleLabel(squareColorLabel);
+	squareColorLabel.position(squareColorPicker.x + squareColorPicker.width + 16, squareColorPicker.y - 4);
+
+	triangleColorPicker = createColorPicker(TRIANGLE_FILL_COLOR || '#90EE90');
+	triangleColorPicker.position(20, _y); _y += SLIDER_GAP;
+	triangleColorLabel = createDiv('triangle color');
+	styleLabel(triangleColorLabel);
+	triangleColorLabel.position(triangleColorPicker.x + triangleColorPicker.width + 16, triangleColorPicker.y - 4);
+
+	rLabel = createDiv('bg hue');
 	styleLabel(rLabel);
 	rLabel.position(rSlider.x + rSlider.width + 16, rSlider.y - 4);
 	vertexLabel = createDiv('vertices ' + num_points);
@@ -135,7 +156,7 @@ function setup() {
 	fillCheckbox = createCheckbox('Display blob fill', false);
 	fillCheckbox.position(20, checkboxY); checkboxY += CHECKBOX_GAP;
 	styleCheckbox(fillCheckbox);
-	rimCheckbox = createCheckbox('Display blob border rim', false);
+	rimCheckbox = createCheckbox('Display blob border rim', true);
 	rimCheckbox.position(20, checkboxY); checkboxY += CHECKBOX_GAP;
 	styleCheckbox(rimCheckbox);
 	wireCheckbox = createCheckbox('Display blob wire-frame', false);
@@ -156,6 +177,11 @@ function setup() {
 	centerDragCheckbox = createCheckbox('Tug from blob center', true);
 	centerDragCheckbox.position(20, checkboxY); checkboxY += CHECKBOX_GAP;
 	styleCheckbox(centerDragCheckbox);
+
+	// INSERTED: toggle blob splitting
+	splitCheckbox = createCheckbox('Enable blob splitting', ENABLE_BLOB_SPLIT_ON_PENETRATION);
+	splitCheckbox.position(20, checkboxY); checkboxY += CHECKBOX_GAP;
+	styleCheckbox(splitCheckbox);
 
 	BASE_NUM_POINTS = num_points;
 	softBody = new SoftBody(inner_radius, outer_radius, num_points);
@@ -196,7 +222,12 @@ function draw() {
 	const g = 11;
 	const gravScale = gravitySlider ? gravitySlider.value() : 1;
 	const densityScale = densitySlider ? densitySlider.value() : 1;
-	background(r, g, BACKGROUND_BLUE);
+	// Rainbow background using hue slider (HSB)
+	push();
+	colorMode(HSB, 360, 100, 100, 255);
+	const hueVal = rSlider ? rSlider.value() : 200;
+	background(hueVal, 80, 20);
+	pop();
 	BLOB_FILL_GRAY = fillColorSlider ? fillColorSlider.value() : 0;
 	window.__blobFillAlpha = fillOpacitySlider ? Math.round(255 * (fillOpacitySlider.value() / 100)) : 204;
 	const targetThickness = thicknessSlider ? thicknessSlider.value() : thickness;
@@ -210,6 +241,20 @@ function draw() {
 		let scale = obstacleRepelSlider.value();
 		OBSTACLE_CONTACT_REPEL_K = OBSTACLE_CONTACT_REPEL_K_BASE * scale;
 		OBSTACLE_MAX_PAIR_FORCE = OBSTACLE_MAX_PAIR_FORCE_BASE * max(0.2, scale);
+	}
+	// Update per-shape colors from pickers
+	if (typeof circleColorPicker !== 'undefined') {
+		CIRCLE_FILL_COLOR = circleColorPicker.value();
+	}
+	if (typeof squareColorPicker !== 'undefined') {
+		SQUARE_FILL_COLOR = squareColorPicker.value();
+	}
+	if (typeof triangleColorPicker !== 'undefined') {
+		TRIANGLE_FILL_COLOR = triangleColorPicker.value();
+	}
+	// INSERTED: wire blob splitting checkbox
+	if (typeof splitCheckbox !== 'undefined' && typeof ENABLE_BLOB_SPLIT_ON_PENETRATION !== 'undefined') {
+		ENABLE_BLOB_SPLIT_ON_PENETRATION = !!splitCheckbox.checked();
 	}
 	updatePhysics();
 	// Update cursor based on drag state
@@ -271,8 +316,8 @@ function drawObjects() {
 		}
 	}
 	if (showRim) {
-		stroke(0, 122, 255);
-		strokeWeight(2);
+		stroke(0, 255, 0);
+		strokeWeight(3);
 		for (var b = 0; b < blobs.length; b++) {
 			let blob = blobs[b];
 			for (var j = 0; j < blob.vertexCount; j++) {

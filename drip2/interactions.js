@@ -128,11 +128,13 @@ function applyGlobalScroll() {
 		}
 	}
 	for (var j = 0; j < obstacles.length; j++) {
-		obstacles[j].y += dy;
+		let scale = (typeof obstacles[j].densityScale === 'number') ? obstacles[j].densityScale : 1.0;
+		let dyObs = dy * scale;
+		obstacles[j].y += dyObs;
 		// Also scroll their trails
 		if (obstacles[j].trail && obstacles[j].trail.length > 0) {
 			for (var t = 0; t < obstacles[j].trail.length; t++) {
-				obstacles[j].trail[t].y += dy;
+				obstacles[j].trail[t].y += dyObs;
 			}
 		}
 	}
@@ -151,10 +153,14 @@ function spawnObstacleBelow() {
 	let rmin = CANVAS_SIZE / 24;
 	let rmax = CANVAS_SIZE / 6;
 	let rr = random(rmin, rmax);
-	// Span full width while keeping circle fully inside [0, width]
+	// Span full width while keeping obstacle fully inside [0, width]
 	let x = random(rr, max(rr + 1, width - rr));
 	let y = height + rr + random(CANVAS_SIZE * 0.1, CANVAS_SIZE * 0.6);
-	return new ObstacleCircle(x, y, rr);
+	// Equal probability among circle, square, triangle
+	let t = Math.floor(random(0, 3));
+	if (t === 0) return new ObstacleCircle(x, y, rr);
+	if (t === 1) return new ObstacleSquare(x, y, rr);
+	return new ObstacleTriangle(x, y, rr);
 }
 
 function spawnObstacleInView() {
@@ -164,7 +170,10 @@ function spawnObstacleInView() {
     // Ensure obstacle fully inside viewport horizontally and vertically
     let x = random(rr, max(rr + 1, width - rr));
     let y = random(rr, max(rr + 1, height - rr));
-    return new ObstacleCircle(x, y, rr);
+    let t = Math.floor(random(0, 3));
+    if (t === 0) return new ObstacleCircle(x, y, rr);
+    if (t === 1) return new ObstacleSquare(x, y, rr);
+    return new ObstacleTriangle(x, y, rr);
 }
 
 function recycleObstacles() {
