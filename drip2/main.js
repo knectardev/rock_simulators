@@ -2,7 +2,7 @@
 let rSlider, vertexSlider, gravitySlider, densitySlider, fillColorSlider, fillOpacitySlider, thicknessSlider, frictionSlider, obstacleDensitySlider, obstacleSpawnRateSlider, obstacleRepelSlider;
 let rLabel, vertexLabel, gravityLabel, densityLabel, thicknessLabel, fillLabel, fillOpacityLabel, frictionLabel, obstacleDensityLabel, obstacleSpawnRateLabel, obstacleRepelLabel;
 let uiPanel;
-let fillCheckbox, rimCheckbox, wireCheckbox, pointsCheckbox, solidCheckbox, trailCheckbox;
+let fillCheckbox, rimCheckbox, wireCheckbox, pointsCheckbox, solidCheckbox, trailCheckbox, centerDragCheckbox;
 let BASE_NUM_POINTS;
 
 let ADD_RANDOM_CROSS_SPRINGS = false;
@@ -149,6 +149,9 @@ function setup() {
 	trailCheckbox = createCheckbox('Display obstacle trails', false);
 	trailCheckbox.position(20, checkboxY); checkboxY += CHECKBOX_GAP;
 	styleCheckbox(trailCheckbox);
+	centerDragCheckbox = createCheckbox('Tug from blob center', false);
+	centerDragCheckbox.position(20, checkboxY); checkboxY += CHECKBOX_GAP;
+	styleCheckbox(centerDragCheckbox);
 
 	BASE_NUM_POINTS = num_points;
 	softBody = new SoftBody(inner_radius, outer_radius, num_points);
@@ -292,16 +295,22 @@ function drawObjects() {
 		fill(0, 255, 0);
 		let blob = (typeof draggedBlobIndex === 'number' && draggedBlobIndex >= 0 && draggedBlobIndex < blobs.length) ? blobs[draggedBlobIndex] : null;
 		if (blob) {
-			let isOuter = (draggedPointIndex % 2) === 1;
-			let v = Math.floor(draggedPointIndex / 2);
-			for (let k = -DRAG_NEIGHBOR_RANGE; k <= DRAG_NEIGHBOR_RANGE; k++) {
-				let j = (v + k + blob.vertexCount) % blob.vertexCount;
-				let idxPrimary = isOuter ? (2 * j + 1) : (2 * j);
-				let idxPair = isOuter ? (2 * j) : (2 * j + 1);
+			if (centerDragCheckbox && centerDragCheckbox.checked()) {
+				let centre = blob.points[blob.points.length - 1];
 				strokeWeight(2);
-				line(blob.points[idxPrimary].x, blob.points[idxPrimary].y, mouseX, mouseY);
-				strokeWeight(1);
-				line(blob.points[idxPair].x, blob.points[idxPair].y, mouseX, mouseY);
+				line(centre.x, centre.y, mouseX, mouseY);
+			} else {
+				let isOuter = (draggedPointIndex % 2) === 1;
+				let v = Math.floor(draggedPointIndex / 2);
+				for (let k = -DRAG_NEIGHBOR_RANGE; k <= DRAG_NEIGHBOR_RANGE; k++) {
+					let j = (v + k + blob.vertexCount) % blob.vertexCount;
+					let idxPrimary = isOuter ? (2 * j + 1) : (2 * j);
+					let idxPair = isOuter ? (2 * j) : (2 * j + 1);
+					strokeWeight(2);
+					line(blob.points[idxPrimary].x, blob.points[idxPrimary].y, mouseX, mouseY);
+					strokeWeight(1);
+					line(blob.points[idxPair].x, blob.points[idxPair].y, mouseX, mouseY);
+				}
 			}
 		}
 		circle(mouseX, mouseY, 8);

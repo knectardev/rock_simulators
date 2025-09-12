@@ -40,11 +40,20 @@ function mousePressed() {
 		let bestB = -1, bestIdx = -1, bestD2 = 1e18, bestOuter = outer_radius;
 		for (var b = 0; b < blobs.length; b++) {
 			let blob = blobs[b];
-			for (var i = 0; i < blob.points.length - 1; i++) {
-				let dx = mouseX - blob.points[i].x;
-				let dy = mouseY - blob.points[i].y;
-				let d2 = dx*dx + dy*dy;
-				if (d2 < bestD2) { bestD2 = d2; bestIdx = i; bestB = b; bestOuter = blob.outerRadius; }
+			if (typeof centerDragCheckbox !== 'undefined' && centerDragCheckbox.checked()) {
+				// In center-drag mode, select the hub point (last point)
+				let centreIndex = blob.points.length - 1;
+				let cdx = mouseX - blob.points[centreIndex].x;
+				let cdy = mouseY - blob.points[centreIndex].y;
+				let cd2 = cdx*cdx + cdy*cdy;
+				if (cd2 < bestD2) { bestD2 = cd2; bestIdx = centreIndex; bestB = b; bestOuter = blob.outerRadius; }
+			} else {
+				for (var i = 0; i < blob.points.length - 1; i++) {
+					let dx = mouseX - blob.points[i].x;
+					let dy = mouseY - blob.points[i].y;
+					let d2 = dx*dx + dy*dy;
+					if (d2 < bestD2) { bestD2 = d2; bestIdx = i; bestB = b; bestOuter = blob.outerRadius; }
+				}
 			}
 		}
 		if (bestIdx >= 0 && sqrt(bestD2) <= bestOuter * 1.5) {

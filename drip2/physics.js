@@ -83,7 +83,22 @@ function updatePhysics() {
 	applyObstacleFrictionMulti();
 	updateObstacleDynamicsMulti();
 	if (draggingBlob && typeof draggedBlobIndex === 'number' && draggedBlobIndex >= 0 && draggedPointIndex >= 0 && draggedBlobIndex < blobs.length) {
-		applyDistributedMouseTugForBlob(blobs[draggedBlobIndex], draggedPointIndex);
+		let blobDrag = blobs[draggedBlobIndex];
+		if (typeof centerDragCheckbox !== 'undefined' && centerDragCheckbox.checked()) {
+			// Apply a single spring from the centre point to mouse
+			let centre = blobDrag.points[blobDrag.points.length - 1];
+			let dx = mouseX - centre.x;
+			let dy = mouseY - centre.y;
+			let fx = MOUSE_SPRING_K * dx - (MOUSE_SPRING_DAMP * DRAG_DAMP_MULTIPLIER) * centre.vx;
+			let fy = MOUSE_SPRING_K * dy - (MOUSE_SPRING_DAMP * DRAG_DAMP_MULTIPLIER) * centre.vy;
+			let fmag = sqrt(fx*fx + fy*fy);
+			let maxF = MOUSE_MAX_FORCE;
+			if (fmag > maxF) { let s = maxF / (fmag + 1e-6); fx *= s; fy *= s; }
+			centre.ax += fx;
+			centre.ay += fy;
+		} else {
+			applyDistributedMouseTugForBlob(blobDrag, draggedPointIndex);
+		}
 	}
 	for (var b2 = 0; b2 < blobs.length; b2++) {
 		let bp2 = blobs[b2].points;
