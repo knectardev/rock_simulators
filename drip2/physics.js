@@ -440,13 +440,37 @@ function updateObstacleDynamicsMulti() {
 			}
 		}
 	}
-	// Attach obstacles to child blobs if they are inside
+	// Attach obstacles to blobs if they are inside.
+	// When splitting is enabled, only child blobs absorb (to preserve primary blob behavior).
+	// When splitting is disabled, allow absorption by any blob.
 	for (var oidx = 0; oidx < obstacles.length; oidx++) {
 		let o = obstacles[oidx];
 		if (o.attachedBlobIndex >= 0) continue;
 		for (var bb = 0; bb < blobs.length; bb++) {
-			if (!blobs[bb].isChild) continue;
-			if (obstaclePenetratesBlob(blobs[bb], o)) {
+			// Eligibility depends on split toggle
+			if (typeof ENABLE_BLOB_SPLIT_ON_PENETRATION !== 'undefined' && ENABLE_BLOB_SPLIT_ON_PENETRATION) {
+				if (!blobs[bb].isChild) continue;
+			}
+			let canAttach = obstaclePenetratesBlob(blobs[bb], o);
+			// When splitting is disabled, also allow near-touching obstacles to attach
+			if (!ENABLE_BLOB_SPLIT_ON_PENETRATION && !canAttach) {
+				let blob = blobs[bb];
+				let minDs = 1e9;
+				for (let si = 0; si < blob.vertexCount; si++) {
+					let a = blob.points[2 * si + 1];
+					let bpt = blob.points[(2 * ((si + 1) % blob.vertexCount)) + 1];
+					let ex = bpt.x - a.x, ey = bpt.y - a.y;
+					let len2 = ex*ex + ey*ey + 1e-9;
+					let t = max(0, min(1, ((o.x - a.x) * ex + (o.y - a.y) * ey) / len2));
+					let cx = a.x + t * ex, cy = a.y + t * ey;
+					let dx = o.x - cx, dy = o.y - cy;
+					let ds = sqrt(dx*dx + dy*dy);
+					if (ds < minDs) minDs = ds;
+				}
+				// Consider attached if ring is within a small margin of the obstacle surface
+				if (minDs <= (o.r + CONTACT_BAND * 0.5)) canAttach = true;
+			}
+			if (canAttach) {
 				o.attachedBlobIndex = bb;
 				break;
 			}

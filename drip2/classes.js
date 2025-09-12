@@ -85,7 +85,7 @@ class ObstacleCircle {
 				let c = color(CIRCLE_FILL_COLOR);
 				fill(red(c), green(c), blue(c), alpha(c));
 			} else {
-				fill(255, 22, 22);
+				fill(255);
 			}
 			if (typeof CIRCLE_STROKE_COLOR === 'string') {
 				let s = color(CIRCLE_STROKE_COLOR);

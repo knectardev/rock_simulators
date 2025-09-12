@@ -12,23 +12,29 @@ let DRAW_ALL_INTERNAL_SPRINGS = false;
 let DRAW_CENTER_SPRINGS = false;
 
 let num_points = 80;
-let thickness = 24;
+let thickness = 18;
 let inner_radius = CANVAS_SIZE / 5;
 let outer_radius = inner_radius + thickness;
 let restOuterArea = 0;
 let blobVisFx = 0;
 let blobVisFy = 0;
 let softBody = null;
+let spawnLabels = [];
 
 function instantiateNewSoftBody(cx, cy) {
-	// Preserve current vertex count and thickness settings
+	// Preserve current vertex count and thickness settings, but randomize size 0.5x–1.5x
 	let spawnX = (typeof cx === 'number') ? cx : width/2;
 	let spawnY = (typeof cy === 'number') ? cy : height/2;
-	let blob = new BlobInstance(inner_radius, outer_radius, num_points, spawnX, spawnY);
+	let sizeScale = random(0.5, 1.5);
+	let inner = max(5, inner_radius * sizeScale);
+	let outer = max(inner + 4, outer_radius * sizeScale);
+	let blob = new BlobInstance(inner, outer, num_points, spawnX, spawnY);
 	blob.restOuterArea = blob.computeOuterArea();
 	if (typeof blobs !== 'undefined') {
 		blobs.push(blob);
 	}
+	// Record a temporary green label showing the blob's radius
+	spawnLabels.push({ blob: blob, radius: Math.round(outer), ttl: 1.6 });
 	draggingBlob = false;
 	draggedPointIndex = -1;
 	draggedBlobIndex = -1;
@@ -262,6 +268,8 @@ function draw() {
 	applyGlobalScroll();
 	recycleObstacles();
 	drawObjects();
+	// Draw temporary spawn labels
+	drawSpawnLabels();
 	if (vertexLabel) vertexLabel.html('vertices ' + num_points);
 	if (gravityLabel) gravityLabel.html('gravity ' + gravScale.toFixed(2) + 'x');
 	if (densityLabel) densityLabel.html('density ' + getDensityScale().toFixed(2) + 'x');
@@ -373,6 +381,26 @@ function drawObjects() {
 		// Removed mouse marker circle so the OS hand cursor remains visually unobstructed
 		pop();
 	}
+}
+
+function drawSpawnLabels() {
+	if (!spawnLabels || spawnLabels.length === 0) return;
+	push();
+	noStroke();
+	fill(0, 255, 0);
+	textSize(14);
+	for (let i = spawnLabels.length - 1; i >= 0; i--) {
+		let label = spawnLabels[i];
+		let b = label.blob;
+		if (!b || !b.points || b.points.length === 0) { spawnLabels.splice(i, 1); continue; }
+		let centre = b.points[b.points.length - 1];
+		text(label.radius + ' px', centre.x + 10, centre.y - 10);
+		label.ttl -= RATE;
+		if (label.ttl <= 0) {
+			spawnLabels.splice(i, 1);
+		}
+	}
+	pop();
 }
 
 
