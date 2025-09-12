@@ -19,6 +19,14 @@ const MOUSE_SPRING_K = 6000;
 const MOUSE_SPRING_DAMP = 100;
 const MOUSE_MAX_FORCE = 20000;
 
+// Center-drag stabilization (prevents hub from inverting past rim)
+let CENTER_TUG_MAX_OFFSET_SCALE = 0.0001;  // fraction of blob.innerRadius
+let CENTER_TUG_RESTORE_K = 22000;       // spring back when exceeding limit
+let CENTER_TUG_RESTORE_DAMP = 900;      // damping along radial extension
+let CENTER_TUG_BOUNDARY_K = 58000;      // extra correction when hub is outside rim polygon
+let CENTER_TUG_BOUNDARY_DAMP = 1200;    // damping for boundary correction
+let CENTER_TUG_FORCE_CAP = 20000;       // max accel equivalent for center correction forces
+
 // Drag neighborhood parameters
 const DRAG_NEIGHBOR_RANGE = 2;
 const DRAG_NEIGHBOR_DECAY = 0.6;

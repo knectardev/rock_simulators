@@ -96,6 +96,72 @@ function updatePhysics() {
 			if (fmag > maxF) { let s = maxF / (fmag + 1e-6); fx *= s; fy *= s; }
 			centre.ax += fx;
 			centre.ay += fy;
+
+			// Soft radial limit: if hub moves too far from blob's geometric center, pull it back
+			let limitR = max(1, blobDrag.innerRadius * CENTER_TUG_MAX_OFFSET_SCALE);
+			let geomCx = 0, geomCy = 0;
+			for (var gi = 0; gi < blobDrag.vertexCount; gi++) {
+				geomCx += blobDrag.points[2 * gi + 1].x;
+				geomCy += blobDrag.points[2 * gi + 1].y;
+			}
+			geomCx /= blobDrag.vertexCount;
+			geomCy /= blobDrag.vertexCount;
+			let rdx = centre.x - geomCx;
+			let rdy = centre.y - geomCy;
+			let rlen = sqrt(rdx*rdx + rdy*rdy) + 1e-6;
+			if (rlen > limitR) {
+				let nx = rdx / rlen, ny = rdy / rlen;
+				let excess = rlen - limitR;
+				// Restoring spring proportional to how far beyond limit the hub is
+				let rfx = -CENTER_TUG_RESTORE_K * excess * nx;
+				let rfy = -CENTER_TUG_RESTORE_K * excess * ny;
+				// Add some radial damping relative to hub velocity along the extension
+				let vRad = centre.vx * nx + centre.vy * ny;
+				rfx += -CENTER_TUG_RESTORE_DAMP * vRad * nx;
+				rfy += -CENTER_TUG_RESTORE_DAMP * vRad * ny;
+				// Clamp to dedicated center-tug cap so tuning is visible even if global cap is high
+				let rmag = sqrt(rfx*rfx + rfy*rfy);
+				if (rmag > CENTER_TUG_FORCE_CAP) { let s2 = CENTER_TUG_FORCE_CAP / (rmag + 1e-6); rfx *= s2; rfy *= s2; }
+				centre.ax += rfx;
+				centre.ay += rfy;
+			}
+
+			// Hard boundary: if hub lies outside the rim polygon, push it inside
+			let poly = [];
+			for (var pi = 0; pi < blobDrag.vertexCount; pi++) {
+				poly.push({ x: blobDrag.points[2 * pi + 1].x, y: blobDrag.points[2 * pi + 1].y });
+			}
+			let inside = pointInPolygon(centre.x, centre.y, poly);
+			if (!inside) {
+				// Find nearest rim segment and push the hub inward along its normal
+				let minD = 1e9, nxB = 0, nyB = 0, closestDX = 0, closestDY = 0;
+				for (var si = 0; si < blobDrag.vertexCount; si++) {
+					let a = blobDrag.points[2 * si + 1];
+					let b = blobDrag.points[(2 * ((si + 1) % blobDrag.vertexCount)) + 1];
+					let ex = b.x - a.x, ey = b.y - a.y;
+					let len = sqrt(ex*ex + ey*ey) + 1e-6;
+					let px = centre.x - a.x, py = centre.y - a.y;
+					let t = max(0, min(1, (px*ex + py*ey) / (len*len)));
+					let cx = a.x + t * ex, cy = a.y + t * ey;
+					let dxs = centre.x - cx, dys = centre.y - cy;
+					let ds = sqrt(dxs*dxs + dys*dys);
+					if (ds < minD) { minD = ds; nxB = (ey / len); nyB = (-ex / len); closestDX = dxs; closestDY = dys; }
+				}
+				// Normal points outward for positive area; we want inward, so negate if needed
+				let area = computeOuterAreaForBlob(blobDrag);
+				if (area > 0) { nxB = -nxB; nyB = -nyB; }
+				// Scale boundary force by how far outside we are along the shortest vector
+				let outsideDist = sqrt(closestDX*closestDX + closestDY*closestDY);
+				let bfx = CENTER_TUG_BOUNDARY_K * outsideDist * nxB;
+				let bfy = CENTER_TUG_BOUNDARY_K * outsideDist * nyB;
+				let vAlong = centre.vx * nxB + centre.vy * nyB;
+				bfx += -CENTER_TUG_BOUNDARY_DAMP * vAlong * nxB;
+				bfy += -CENTER_TUG_BOUNDARY_DAMP * vAlong * nyB;
+				let bmag = sqrt(bfx*bfx + bfy*bfy);
+				if (bmag > CENTER_TUG_FORCE_CAP) { let sb = CENTER_TUG_FORCE_CAP / (bmag + 1e-6); bfx *= sb; bfy *= sb; }
+				centre.ax += bfx;
+				centre.ay += bfy;
+			}
 		} else {
 			applyDistributedMouseTugForBlob(blobDrag, draggedPointIndex);
 		}

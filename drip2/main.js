@@ -137,19 +137,19 @@ function setup() {
 	rimCheckbox = createCheckbox('Display blob border rim', false);
 	rimCheckbox.position(20, checkboxY); checkboxY += CHECKBOX_GAP;
 	styleCheckbox(rimCheckbox);
-	wireCheckbox = createCheckbox('Display blob wire-frame', false);
+	wireCheckbox = createCheckbox('Display blob wire-frame', true);
 	wireCheckbox.position(20, checkboxY); checkboxY += CHECKBOX_GAP;
 	styleCheckbox(wireCheckbox);
 	pointsCheckbox = createCheckbox('Display mesh points', false);
 	pointsCheckbox.position(20, checkboxY); checkboxY += CHECKBOX_GAP;
 	styleCheckbox(pointsCheckbox);
-	solidCheckbox = createCheckbox('Display blob solid interior', true);
+	solidCheckbox = createCheckbox('Display blob solid interior', false);
 	solidCheckbox.position(20, checkboxY); checkboxY += CHECKBOX_GAP;
 	styleCheckbox(solidCheckbox);
 	trailCheckbox = createCheckbox('Display obstacle trails', false);
 	trailCheckbox.position(20, checkboxY); checkboxY += CHECKBOX_GAP;
 	styleCheckbox(trailCheckbox);
-	centerDragCheckbox = createCheckbox('Tug from blob center', false);
+	centerDragCheckbox = createCheckbox('Tug from blob center', true);
 	centerDragCheckbox.position(20, checkboxY); checkboxY += CHECKBOX_GAP;
 	styleCheckbox(centerDragCheckbox);
 
